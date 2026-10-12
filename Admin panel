@@ -1,787 +1,1814 @@
 --[[
-	AdminSystem.lua
-	Single-file foundation. Place as a Script in ServerScriptService.
-	Branches on RunService:IsServer() — server half builds remotes/permissions/
-	registry/executor, client half builds the full UI off the same remotes.
-	Chief: this is the foundation. Commands, autocomplete data, and settings
-	panels extend CommandRegistry and the UI builder below in later passes.
+╔══════════════════════════════════════════════════════════════╗
+║           APEX ADMIN  ·  v1.0  ·  Foundation Layer          ║
+║  Architecture : Modular · Registry-driven · Category-indexed ║
+║  Target       : Executor-compatible Luau                     ║
+║  Chat trigger : :commandname arg1 arg2                       ║
+╚══════════════════════════════════════════════════════════════╝
 ]]
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-
-----------------------------------------------------------------------
--- SHARED CONSTANTS (both server and client reference these)
-----------------------------------------------------------------------
-
-local RANKS = {
-	OWNER   = 100,
-	ADMIN   = 80,
-	MOD     = 60,
-	TRUSTED = 40,
-	DEFAULT = 0,
-}
-
-local CATEGORY_LIST = {
-	"Player", "Movement", "Diagnostics", "Search", "Settings", "Misc",
-}
-
-----------------------------------------------------------------------
--- SERVER
-----------------------------------------------------------------------
-
-if RunService:IsServer() then
-
-	-- Remote bridge --------------------------------------------------
-	local AdminRemotes = ReplicatedStorage:FindFirstChild("AdminRemotes")
-	if not AdminRemotes then
-		AdminRemotes = Instance.new("Folder")
-		AdminRemotes.Name = "AdminRemotes"
-		AdminRemotes.Parent = ReplicatedStorage
-	end
-
-	local function getOrCreate(className, name, parent)
-		local existing = parent:FindFirstChild(name)
-		if existing then return existing end
-		local inst = Instance.new(className)
-		inst.Name = name
-		inst.Parent = parent
-		return inst
-	end
-
-	local ExecuteCommand     = getOrCreate("RemoteEvent", "ExecuteCommand", AdminRemotes)
-	local CommandResponse    = getOrCreate("RemoteEvent", "CommandResponse", AdminRemotes)
-	local RequestPermission  = getOrCreate("RemoteFunction", "RequestPermission", AdminRemotes)
-	local GetCommandList     = getOrCreate("RemoteFunction", "GetCommandList", AdminRemotes)
-
-	-- Permission system ------------------------------------------------
-	local PermissionSystem = {}
-
-	-- Fill in real UserIds before publishing. Keys are UserIds, values are rank names.
-	local ROLE_ASSIGNMENTS = {
-		-- [123456789] = "OWNER",
-	}
-
-	-- Per-command minimum rank. Populated by RegisterCommand below.
-	local commandMinRank = {}
-
-	function PermissionSystem.getRank(player)
-		local roleName = ROLE_ASSIGNMENTS[player.UserId]
-		if roleName and RANKS[roleName] then
-			return RANKS[roleName], roleName
-		end
-		return RANKS.DEFAULT, "DEFAULT"
-	end
-
-	function PermissionSystem.hasPermission(player, commandName)
-		if not player or not player:IsA("Player") then
-			return false, "Invalid caller"
-		end
-		local required = commandMinRank[commandName]
-		if required == nil then
-			return false, "Unknown command: " .. tostring(commandName)
-		end
-		local rank = PermissionSystem.getRank(player)
-		if rank >= required then
-			return true, "OK"
-		end
-		return false, "Insufficient permission"
-	end
-
-	-- Command registry ---------------------------------------------------
-	local CommandRegistry = {}
-	local commands = {} -- [name] = { name, aliases, category, description, usage, minRank, run }
-	local aliasMap = {} -- [alias] = canonical name
-
-	function CommandRegistry.register(def)
-		assert(type(def.name) == "string", "command def requires name")
-		assert(type(def.run) == "function", "command def requires run(player, args)")
-		def.category = def.category or "Misc"
-		def.description = def.description or ""
-		def.usage = def.usage or def.name
-		def.minRank = def.minRank or RANKS.ADMIN
-		def.aliases = def.aliases or {}
-
-		commands[def.name] = def
-		commandMinRank[def.name] = def.minRank
-
-		for _, alias in ipairs(def.aliases) do
-			aliasMap[alias] = def.name
-		end
-	end
-
-	function CommandRegistry.resolve(nameOrAlias)
-		if commands[nameOrAlias] then
-			return commands[nameOrAlias]
-		end
-		local canonical = aliasMap[nameOrAlias]
-		if canonical then
-			return commands[canonical]
-		end
-		return nil
-	end
-
-	function CommandRegistry.list()
-		local out = {}
-		for name, def in pairs(commands) do
-			table.insert(out, {
-				name = def.name,
-				category = def.category,
-				description = def.description,
-				usage = def.usage,
-				minRank = def.minRank,
-				aliases = def.aliases,
-			})
-		end
-		table.sort(out, function(a, b) return a.name < b.name end)
-		return out
-	end
-
-	-- Command executor ------------------------------------------------
-	local CommandExecutor = {}
-
-	function CommandExecutor.execute(player, commandName, args)
-		local def = CommandRegistry.resolve(commandName)
-		if not def then
-			return { success = false, message = "Unknown command: " .. tostring(commandName) }
-		end
-
-		local ok, result = pcall(def.run, player, args or {})
-		if not ok then
-			warn(string.format("[AdminSystem] Command '%s' errored: %s", commandName, tostring(result)))
-			return { success = false, message = "Command error: " .. tostring(result) }
-		end
-
-		if type(result) == "table" and result.success ~= nil then
-			return result
-		end
-		return { success = true, message = tostring(result or (commandName .. " executed")) }
-	end
-
-	-- Seed commands (foundation set; later passes add the other 400+) ----
-	CommandRegistry.register({
-		name = "ping",
-		aliases = { "p" },
-		category = "Diagnostics",
-		description = "Replies with server latency acknowledgement.",
-		usage = "ping",
-		minRank = RANKS.DEFAULT,
-		run = function(player, args)
-			return { success = true, message = "Pong. Server time: " .. os.date("%X") }
-		end,
-	})
-
-	CommandRegistry.register({
-		name = "whoami",
-		aliases = { "me" },
-		category = "Diagnostics",
-		description = "Shows your current rank.",
-		usage = "whoami",
-		minRank = RANKS.DEFAULT,
-		run = function(player, args)
-			local rank, roleName = PermissionSystem.getRank(player)
-			return { success = true, message = string.format("%s — Rank: %s (%d)", player.Name, roleName, rank) }
-		end,
-	})
-
-	CommandRegistry.register({
-		name = "heal",
-		aliases = { "hp" },
-		category = "Player",
-		description = "Fully restores target's health.",
-		usage = "heal <player>",
-		minRank = RANKS.MOD,
-		run = function(player, args)
-			local targetName = args[1]
-			if not targetName then
-				return { success = false, message = "Usage: heal <player>" }
-			end
-			local target = Players:FindFirstChild(targetName)
-			if not target or not target.Character then
-				return { success = false, message = "Target not found or has no character." }
-			end
-			local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
-			if not humanoid then
-				return { success = false, message = "Target has no Humanoid." }
-			end
-			humanoid.Health = humanoid.MaxHealth
-			return { success = true, message = "Healed " .. target.Name }
-		end,
-	})
-
-	CommandRegistry.register({
-		name = "teleport",
-		aliases = { "tp" },
-		category = "Movement",
-		description = "Teleports you to target player.",
-		usage = "teleport <player>",
-		minRank = RANKS.MOD,
-		run = function(player, args)
-			local targetName = args[1]
-			if not targetName then
-				return { success = false, message = "Usage: teleport <player>" }
-			end
-			local target = Players:FindFirstChild(targetName)
-			local callerChar = player.Character
-			if not target or not target.Character or not callerChar then
-				return { success = false, message = "Invalid target or missing character." }
-			end
-			local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-			local callerRoot = callerChar:FindFirstChild("HumanoidRootPart")
-			if not targetRoot or not callerRoot then
-				return { success = false, message = "Missing HumanoidRootPart." }
-			end
-			callerRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 2, 0)
-			return { success = true, message = "Teleported to " .. target.Name }
-		end,
-	})
-
-	CommandRegistry.register({
-		name = "listcommands",
-		aliases = { "help", "cmds" },
-		category = "Diagnostics",
-		description = "Lists all available commands.",
-		usage = "listcommands",
-		minRank = RANKS.DEFAULT,
-		run = function(player, args)
-			local names = {}
-			for _, def in ipairs(CommandRegistry.list()) do
-				table.insert(names, def.name)
-			end
-			return { success = true, message = "Commands: " .. table.concat(names, ", ") }
-		end,
-	})
-
-	-- Remote wiring -----------------------------------------------------
-	ExecuteCommand.OnServerEvent:Connect(function(player, commandName, args)
-		if type(commandName) ~= "string" then return end
-		if args ~= nil and type(args) ~= "table" then return end
-
-		local permitted, reason = PermissionSystem.hasPermission(player, commandName)
-		if not permitted then
-			CommandResponse:FireClient(player, {
-				success = false,
-				message = "[DENIED] " .. reason,
-				commandName = commandName,
-				timestamp = os.time(),
-			})
-			return
-		end
-
-		local result = CommandExecutor.execute(player, commandName, args)
-		CommandResponse:FireClient(player, {
-			success = result.success,
-			message = result.message,
-			commandName = commandName,
-			timestamp = os.time(),
-		})
-	end)
-
-	RequestPermission.OnServerInvoke = function(player, commandName)
-		return PermissionSystem.hasPermission(player, commandName)
-	end
-
-	GetCommandList.OnServerInvoke = function(player)
-		-- Only return commands the player can see (their rank meets minimum,
-		-- or show all with a locked flag — foundation returns all with lock state)
-		local rank = PermissionSystem.getRank(player)
-		local out = {}
-		for _, def in ipairs(CommandRegistry.list()) do
-			table.insert(out, {
-				name = def.name,
-				category = def.category,
-				description = def.description,
-				usage = def.usage,
-				aliases = def.aliases,
-				locked = rank < def.minRank,
-			})
-		end
-		return out
-	end
-
-	print("[AdminSystem] Server half initialized. " .. #CommandRegistry.list() .. " commands registered.")
-
-----------------------------------------------------------------------
--- CLIENT
-----------------------------------------------------------------------
-
-else
-
-	local player = Players.LocalPlayer
-	local playerGui = player:WaitForChild("PlayerGui")
-
-	local AdminRemotes = ReplicatedStorage:WaitForChild("AdminRemotes")
-	local ExecuteCommand = AdminRemotes:WaitForChild("ExecuteCommand")
-	local CommandResponse = AdminRemotes:WaitForChild("CommandResponse")
-	local RequestPermission = AdminRemotes:WaitForChild("RequestPermission")
-	local GetCommandList = AdminRemotes:WaitForChild("GetCommandList")
-
-	-- Theme ------------------------------------------------------------
-	local THEME = {
-		panelBg      = Color3.fromRGB(18, 18, 24),
-		panelBgAlpha = 0.18,
-		accent       = Color3.fromRGB(0, 225, 255),
-		accentDim    = Color3.fromRGB(0, 140, 170),
-		textPrimary  = Color3.fromRGB(235, 240, 245),
-		textDim      = Color3.fromRGB(150, 158, 168),
-		danger       = Color3.fromRGB(255, 80, 95),
-		success      = Color3.fromRGB(80, 255, 170),
-		corner       = UDim.new(0, 10),
-		font         = Enum.Font.GothamMedium,
-		fontBold     = Enum.Font.GothamBold,
-	}
-
-	local function corner(inst, radius)
-		local c = Instance.new("UICorner")
-		c.CornerRadius = radius or THEME.corner
-		c.Parent = inst
-		return c
-	end
-
-	local function stroke(inst, color, thickness)
-		local s = Instance.new("UIStroke")
-		s.Color = color or THEME.accentDim
-		s.Thickness = thickness or 1
-		s.Transparency = 0.4
-		s.Parent = inst
-		return s
-	end
-
-	local function tween(inst, props, duration, style)
-		local t = TweenService:Create(
-			inst,
-			TweenInfo.new(duration or 0.18, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			props
-		)
-		t:Play()
-		return t
-	end
-
-	-- Root ScreenGui -----------------------------------------------------
-	local existing = playerGui:FindFirstChild("AdminSystemUI")
-	if existing then existing:Destroy() end
-
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "AdminSystemUI"
-	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.DisplayOrder = 100
-	screenGui.Parent = playerGui
-
-	-- Main window -------------------------------------------------------
-	local mainFrame = Instance.new("Frame")
-	mainFrame.Name = "MainFrame"
-	mainFrame.Size = UDim2.new(0, 560, 0, 420)
-	mainFrame.Position = UDim2.new(0.5, -280, 0.5, -210)
-	mainFrame.BackgroundColor3 = THEME.panelBg
-	mainFrame.BackgroundTransparency = THEME.panelBgAlpha
-	mainFrame.BorderSizePixel = 0
-	mainFrame.Active = true
-	mainFrame.Visible = false -- toggled with keybind below
-	mainFrame.Parent = screenGui
-	corner(mainFrame, UDim.new(0, 14))
-	stroke(mainFrame, THEME.accent, 1)
-
-	local uiGradient = Instance.new("UIGradient")
-	uiGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 30)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 14, 18)),
-	})
-	uiGradient.Rotation = 90
-	uiGradient.Parent = mainFrame
-
-	-- Title bar (drag handle) --------------------------------------------
-	local titleBar = Instance.new("Frame")
-	titleBar.Name = "TitleBar"
-	titleBar.Size = UDim2.new(1, 0, 0, 40)
-	titleBar.BackgroundTransparency = 1
-	titleBar.Parent = mainFrame
-
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Name = "TitleLabel"
-	titleLabel.Size = UDim2.new(1, -40, 1, 0)
-	titleLabel.Position = UDim2.new(0, 16, 0, 0)
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "ADMIN // COMMAND CONSOLE"
-	titleLabel.TextColor3 = THEME.accent
-	titleLabel.Font = THEME.fontBold
-	titleLabel.TextSize = 15
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.Parent = titleBar
-
-	local closeButton = Instance.new("TextButton")
-	closeButton.Name = "CloseButton"
-	closeButton.Size = UDim2.new(0, 28, 0, 28)
-	closeButton.Position = UDim2.new(1, -36, 0, 6)
-	closeButton.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
-	closeButton.Text = "x"
-	closeButton.TextColor3 = THEME.textPrimary
-	closeButton.Font = THEME.fontBold
-	closeButton.TextSize = 16
-	closeButton.Parent = titleBar
-	corner(closeButton, UDim.new(0, 8))
-
-	closeButton.MouseButton1Click:Connect(function()
-		tween(mainFrame, { BackgroundTransparency = 1 }, 0.15)
-		task.wait(0.15)
-		mainFrame.Visible = false
-		mainFrame.BackgroundTransparency = THEME.panelBgAlpha
-	end)
-
-	-- Dragging logic -------------------------------------------------------
-	do
-		local dragging = false
-		local dragStart, startPos
-
-		titleBar.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-				dragging = true
-				dragStart = input.Position
-				startPos = mainFrame.Position
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then
-						dragging = false
-					end
-				end)
-			end
-		end)
-
-		UserInputService.InputChanged:Connect(function(input)
-			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch) then
-				local delta = input.Position - dragStart
-				mainFrame.Position = UDim2.new(
-					startPos.X.Scale, startPos.X.Offset + delta.X,
-					startPos.Y.Scale, startPos.Y.Offset + delta.Y
-				)
-			end
-		end)
-	end
-
-	-- Category nav (left rail) -----------------------------------------
-	local categoryRail = Instance.new("Frame")
-	categoryRail.Name = "CategoryRail"
-	categoryRail.Size = UDim2.new(0, 120, 1, -100)
-	categoryRail.Position = UDim2.new(0, 10, 0, 46)
-	categoryRail.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
-	categoryRail.BackgroundTransparency = 0.2
-	categoryRail.Parent = mainFrame
-	corner(categoryRail, UDim.new(0, 10))
-
-	local categoryList = Instance.new("UIListLayout")
-	categoryList.Padding = UDim.new(0, 6)
-	categoryList.SortOrder = Enum.SortOrder.LayoutOrder
-	categoryList.Parent = categoryRail
-
-	local categoryPadding = Instance.new("UIPadding")
-	categoryPadding.PaddingTop = UDim.new(0, 8)
-	categoryPadding.PaddingLeft = UDim.new(0, 6)
-	categoryPadding.PaddingRight = UDim.new(0, 6)
-	categoryPadding.Parent = categoryRail
-
-	local activeCategory = "All"
-	local categoryButtons = {}
-
-	local function setActiveCategory(name)
-		activeCategory = name
-		for catName, btn in pairs(categoryButtons) do
-			if catName == name then
-				tween(btn, { BackgroundTransparency = 0.1 }, 0.12)
-				btn.TextColor3 = THEME.accent
-			else
-				tween(btn, { BackgroundTransparency = 0.6 }, 0.12)
-				btn.TextColor3 = THEME.textDim
-			end
-		end
-	end
-
-	local function makeCategoryButton(name, order)
-		local btn = Instance.new("TextButton")
-		btn.Name = name .. "Button"
-		btn.Size = UDim2.new(1, 0, 0, 30)
-		btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-		btn.BackgroundTransparency = 0.6
-		btn.Text = name
-		btn.Font = THEME.font
-		btn.TextSize = 13
-		btn.TextColor3 = THEME.textDim
-		btn.LayoutOrder = order
-		btn.Parent = categoryRail
-		corner(btn, UDim.new(0, 8))
-
-		btn.MouseButton1Click:Connect(function()
-			setActiveCategory(name)
-		end)
-
-		categoryButtons[name] = btn
-		return btn
-	end
-
-	makeCategoryButton("All", 0)
-	for i, cat in ipairs(CATEGORY_LIST) do
-		makeCategoryButton(cat, i)
-	end
-	setActiveCategory("All")
-
-	-- History panel (right side, above input) -----------------------------
-	local historyFrame = Instance.new("ScrollingFrame")
-	historyFrame.Name = "HistoryFrame"
-	historyFrame.Size = UDim2.new(1, -150, 1, -140)
-	historyFrame.Position = UDim2.new(0, 140, 0, 46)
-	historyFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
-	historyFrame.BackgroundTransparency = 0.15
-	historyFrame.BorderSizePixel = 0
-	historyFrame.ScrollBarThickness = 4
-	historyFrame.ScrollBarImageColor3 = THEME.accentDim
-	historyFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-	historyFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	historyFrame.Parent = mainFrame
-	corner(historyFrame, UDim.new(0, 10))
-
-	local historyLayout = Instance.new("UIListLayout")
-	historyLayout.Padding = UDim.new(0, 4)
-	historyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	historyLayout.Parent = historyFrame
-
-	local historyPadding = Instance.new("UIPadding")
-	historyPadding.PaddingTop = UDim.new(0, 8)
-	historyPadding.PaddingLeft = UDim.new(0, 10)
-	historyPadding.PaddingRight = UDim.new(0, 10)
-	historyPadding.PaddingBottom = UDim.new(0, 8)
-	historyPadding.Parent = historyFrame
-
-	local historyOrderCounter = 0
-
-	local function pushHistoryEntry(text, kind)
-		historyOrderCounter += 1
-		local entry = Instance.new("TextLabel")
-		entry.Name = "Entry" .. historyOrderCounter
-		entry.Size = UDim2.new(1, 0, 0, 0)
-		entry.AutomaticSize = Enum.AutomaticSize.Y
-		entry.BackgroundTransparency = 1
-		entry.Text = text
-		entry.TextWrapped = true
-		entry.TextXAlignment = Enum.TextXAlignment.Left
-		entry.Font = THEME.font
-		entry.TextSize = 13
-		entry.LayoutOrder = historyOrderCounter
-		if kind == "error" then
-			entry.TextColor3 = THEME.danger
-		elseif kind == "success" then
-			entry.TextColor3 = THEME.success
-		else
-			entry.TextColor3 = THEME.textDim
-		end
-		entry.Parent = historyFrame
-
-		task.defer(function()
-			historyFrame.CanvasPosition = Vector2.new(0, historyFrame.AbsoluteCanvasSize.Y)
-		end)
-	end
-
-	pushHistoryEntry("[SYSTEM] Admin console ready.", "info")
-
-	-- Input row -----------------------------------------------------------
-	local inputRow = Instance.new("Frame")
-	inputRow.Name = "InputRow"
-	inputRow.Size = UDim2.new(1, -20, 0, 42)
-	inputRow.Position = UDim2.new(0, 10, 1, -52)
-	inputRow.BackgroundTransparency = 1
-	inputRow.Parent = mainFrame
-
-	local inputBox = Instance.new("TextBox")
-	inputBox.Name = "CommandInput"
-	inputBox.Size = UDim2.new(1, -90, 1, 0)
-	inputBox.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
-	inputBox.BackgroundTransparency = 0.1
-	inputBox.PlaceholderText = "Type a command…"
-	inputBox.PlaceholderColor3 = THEME.textDim
-	inputBox.Text = ""
-	inputBox.TextColor3 = THEME.textPrimary
-	inputBox.Font = THEME.font
-	inputBox.TextSize = 14
-	inputBox.TextXAlignment = Enum.TextXAlignment.Left
-	inputBox.ClearTextOnFocus = false
-	inputBox.Parent = inputRow
-	corner(inputBox, UDim.new(0, 8))
-	local inputStroke = stroke(inputBox, THEME.accentDim, 1)
-
-	local inputTextPadding = Instance.new("UIPadding")
-	inputTextPadding.PaddingLeft = UDim.new(0, 10)
-	inputTextPadding.PaddingRight = UDim.new(0, 10)
-	inputTextPadding.Parent = inputBox
-
-	inputBox.Focused:Connect(function()
-		tween(inputStroke, { Color = THEME.accent, Transparency = 0 }, 0.15)
-	end)
-	inputBox.FocusLost:Connect(function(enterPressed)
-		tween(inputStroke, { Color = THEME.accentDim, Transparency = 0.4 }, 0.15)
-	end)
-
-	local executeButton = Instance.new("TextButton")
-	executeButton.Name = "ExecuteButton"
-	executeButton.Size = UDim2.new(0, 80, 1, 0)
-	executeButton.Position = UDim2.new(1, -80, 0, 0)
-	executeButton.BackgroundColor3 = THEME.accent
-	executeButton.Text = "RUN"
-	executeButton.Font = THEME.fontBold
-	executeButton.TextSize = 14
-	executeButton.TextColor3 = Color3.fromRGB(10, 10, 14)
-	executeButton.Parent = inputRow
-	corner(executeButton, UDim.new(0, 8))
-
-	executeButton.MouseEnter:Connect(function()
-		tween(executeButton, { BackgroundColor3 = Color3.fromRGB(60, 240, 255) }, 0.12)
-	end)
-	executeButton.MouseLeave:Connect(function()
-		tween(executeButton, { BackgroundColor3 = THEME.accent }, 0.12)
-	end)
-
-	-- Autocomplete dropdown -------------------------------------------------
-	local autocompleteFrame = Instance.new("ScrollingFrame")
-	autocompleteFrame.Name = "AutocompleteFrame"
-	autocompleteFrame.Size = UDim2.new(1, -90, 0, 0)
-	autocompleteFrame.AutomaticSize = Enum.AutomaticSize.Y
-	autocompleteFrame.Position = UDim2.new(0, 0, 0, -4)
-	autocompleteFrame.AnchorPoint = Vector2.new(0, 1)
-	autocompleteFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
-	autocompleteFrame.BackgroundTransparency = 0.05
-	autocompleteFrame.BorderSizePixel = 0
-	autocompleteFrame.ScrollBarThickness = 3
-	autocompleteFrame.Visible = false
-	autocompleteFrame.ZIndex = 5
-	autocompleteFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-	autocompleteFrame.Parent = inputRow
-	corner(autocompleteFrame, UDim.new(0, 8))
-	stroke(autocompleteFrame, THEME.accent, 1)
-
-	local autocompleteLayout = Instance.new("UIListLayout")
-	autocompleteLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	autocompleteLayout.Parent = autocompleteFrame
-
-	-- Command cache (populated from server) ----------------------------
-	local commandCache = {}
-
-	local function refreshCommandCache()
-		local ok, list = pcall(function()
-			return GetCommandList:InvokeServer()
-		end)
-		if ok and type(list) == "table" then
-			commandCache = list
-		end
-	end
-
-	local function clearAutocomplete()
-		for _, child in ipairs(autocompleteFrame:GetChildren()) do
-			if child:IsA("TextButton") then
-				child:Destroy()
-			end
-		end
-		autocompleteFrame.Visible = false
-	end
-
-	local function buildAutocomplete(query)
-		clearAutocomplete()
-		if query == "" then return end
-
-		local matches = {}
-		for _, def in ipairs(commandCache) do
-			if string.sub(def.name, 1, #query) == query and not def.locked then
-				table.insert(matches, def)
-			end
-		end
-		table.sort(matches, function(a, b) return a.name < b.name end)
-
-		if #matches == 0 then return end
-
-		for i, def in ipairs(matches) do
-			if i > 8 then break end
-			local optBtn = Instance.new("TextButton")
-			optBtn.Name = "Opt" .. i
-			optBtn.Size = UDim2.new(1, 0, 0, 28)
-			optBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
-			optBtn.BackgroundTransparency = 0.3
-			optBtn.Text = string.format("%s  —  %s", def.name, def.description)
-			optBtn.TextXAlignment = Enum.TextXAlignment.Left
-			optBtn.Font = THEME.font
-			optBtn.TextSize = 12
-			optBtn.TextColor3 = THEME.textPrimary
-			optBtn.TextTruncate = Enum.TextTruncate.AtEnd
-			optBtn.LayoutOrder = i
-			optBtn.Parent = autocompleteFrame
-
-			local optPad = Instance.new("UIPadding")
-			optPad.PaddingLeft = UDim.new(0, 10)
-			optPad.Parent = optBtn
-
-			optBtn.MouseButton1Click:Connect(function()
-				inputBox.Text = def.name .. " "
-				clearAutocomplete()
-				inputBox:CaptureFocus()
-			end)
-		end
-
-		autocompleteFrame.Visible = true
-	end
-
-	inputBox:GetPropertyChangedSignal("Text"):Connect(function()
-		local text = inputBox.Text
-		local firstWord = text:match("^(%S*)") or ""
-		if text == "" or text:find(" ") then
-			clearAutocomplete()
-		else
-			buildAutocomplete(firstWord)
-		end
-	end)
-
-	-- Submit logic -------------------------------------------------------
-	local function submitCommand()
-		local raw = inputBox.Text
-		if raw == "" then return end
-
-		local parts = {}
-		for word in raw:gmatch("%S+") do
-			table.insert(parts, word)
-		end
-		local commandName = table.remove(parts, 1)
-
-		pushHistoryEntry("> " .. raw, "info")
-		clearAutocomplete()
-		inputBox.Text = ""
-
-		ExecuteCommand:FireServer(commandName, parts)
-	end
-
-	executeButton.MouseButton1Click:Connect(submitCommand)
-	inputBox.FocusLost:Connect(function(enterPressed)
-		if enterPressed then
-			submitCommand()
-		end
-	end)
-
-	CommandResponse.OnClientEvent:Connect(function(payload)
-		local prefix = payload.success and "[OK]" or "[FAIL]"
-		pushHistoryEntry(prefix .. " " .. payload.message, payload.success and "success" or "error")
-	end)
-
-	-- Toggle keybind (RightControl) ---------------------------------------
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-		if input.KeyCode == Enum.KeyCode.RightControl then
-			mainFrame.Visible = not mainFrame.Visible
-			if mainFrame.Visible then
-				refreshCommandCache()
-				mainFrame.BackgroundTransparency = 1
-				tween(mainFrame, { BackgroundTransparency = THEME.panelBgAlpha }, 0.18)
-			end
-		end
-	end)
-
-	refreshCommandCache()
-
-	print("[AdminSystem] Client UI initialized. Press RightControl to toggle.")
+-- ══════════════════════════════════════════════════════════════
+-- SERVICES
+-- ══════════════════════════════════════════════════════════════
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local Players           = game:GetService("Players")
+local TextService       = game:GetService("TextService")
+local StarterGui        = game:GetService("StarterGui")
+
+local LP     = Players.LocalPlayer
+local PGui   = LP:WaitForChild("PlayerGui")
+local Cam    = workspace.CurrentCamera
+
+-- ══════════════════════════════════════════════════════════════
+-- HOT-RELOAD GUARD
+-- ══════════════════════════════════════════════════════════════
+if not getgenv then getgenv = function() return _G end end
+local ENV = getgenv()
+if ENV.ApexAdmin then
+    pcall(function() ENV.ApexAdmin:Destroy() end)
+    pcall(function() ENV.ApexAdmin_ChatConn:Disconnect() end)
 end
+
+-- ══════════════════════════════════════════════════════════════
+-- THEME
+-- ══════════════════════════════════════════════════════════════
+local T = {
+    -- Backgrounds
+    BG          = Color3.fromRGB(6,   6,   10),
+    BGAlt       = Color3.fromRGB(10,  10,  16),
+    Surface     = Color3.fromRGB(14,  14,  22),
+    SurfaceHov  = Color3.fromRGB(20,  20,  32),
+    SurfaceSel  = Color3.fromRGB(28,  20,  50),
+
+    -- Neon accents
+    Violet      = Color3.fromRGB(130, 80,  255),
+    VioletBright= Color3.fromRGB(165, 110, 255),
+    Cyan        = Color3.fromRGB(0,   210, 255),
+    CyanDim     = Color3.fromRGB(0,   160, 200),
+    Green       = Color3.fromRGB(0,   230, 140),
+    Yellow      = Color3.fromRGB(255, 195, 0),
+    Red         = Color3.fromRGB(255, 55,  80),
+    Pink        = Color3.fromRGB(255, 80,  160),
+    Orange      = Color3.fromRGB(255, 145, 0),
+
+    -- Text
+    TxtPri      = Color3.fromRGB(240, 240, 255),
+    TxtSec      = Color3.fromRGB(155, 150, 180),
+    TxtDim      = Color3.fromRGB(80,  78,  100),
+    TxtInput    = Color3.fromRGB(255, 255, 255),
+    TxtMatch    = Color3.fromRGB(165, 110, 255),
+
+    -- Borders (pure black outlines always)
+    Border      = Color3.fromRGB(0,   0,   0),
+    BorderGlow  = Color3.fromRGB(80,  50,  180),
+
+    -- Transparency values
+    BGTrans     = 0.10,
+    SurfTrans   = 0.06,
+    GlowTrans   = 0.72,
+    MinBarTrans = 0.08,
+
+    -- Font
+    FontBold    = Enum.Font.GothamBold,
+    FontMed     = Enum.Font.Gotham,
+    FontLight   = Enum.Font.Gotham,
+    FontMono    = Enum.Font.RobotoMono,
+    SzTitle     = 14,
+    SzBody      = 13,
+    SzSmall     = 11,
+    SzInput     = 14,
+    SzTag       = 10,
+
+    -- Dimensions
+    BarH        = 46,
+    MinBarH     = 36,
+    MinBarW     = 320,
+    DropMaxH    = 300,
+    ResizeGrip  = 10,
+    PanelW      = 580,
+    PanelH      = 480,
+
+    -- Animation infos
+    Fast   = TweenInfo.new(0.10, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Med    = TweenInfo.new(0.20, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Slow   = TweenInfo.new(0.36, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Bounce = TweenInfo.new(0.30, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+    Spring = TweenInfo.new(0.40, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+
+    -- Radius
+    R     = UDim.new(0, 6),
+    RLg   = UDim.new(0, 10),
+    RPill = UDim.new(0, 18),
+}
+
+-- ══════════════════════════════════════════════════════════════
+-- UTILITY
+-- ══════════════════════════════════════════════════════════════
+local U = {}
+
+function U.Tween(i, info, props)
+    local tw = TweenService:Create(i, info, props)
+    tw:Play(); return tw
+end
+
+function U.Corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = r or T.R
+    c.Parent = p; return c
+end
+
+function U.Stroke(p, col, thick, tr)
+    local s = Instance.new("UIStroke")
+    s.Color            = col   or T.Border
+    s.Thickness        = thick or 2
+    s.Transparency     = tr    or 0
+    s.ApplyStrokeMode  = Enum.ApplyStrokeMode.Border
+    s.Parent = p; return s
+end
+
+function U.Pad(p, t, b, l, r)
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop    = UDim.new(0, t or 0)
+    pad.PaddingBottom = UDim.new(0, b or 0)
+    pad.PaddingLeft   = UDim.new(0, l or 0)
+    pad.PaddingRight  = UDim.new(0, r or 0)
+    pad.Parent = p; return pad
+end
+
+function U.List(p, dir, sp, ha, va)
+    local l = Instance.new("UIListLayout")
+    l.FillDirection       = dir or Enum.FillDirection.Vertical
+    l.Padding             = UDim.new(0, sp or 0)
+    l.SortOrder           = Enum.SortOrder.LayoutOrder
+    l.HorizontalAlignment = ha  or Enum.HorizontalAlignment.Left
+    l.VerticalAlignment   = va  or Enum.VerticalAlignment.Top
+    l.Parent = p; return l
+end
+
+function U.Frame(props)
+    local f = Instance.new("Frame")
+    f.BackgroundColor3       = props.bg    or T.Surface
+    f.BackgroundTransparency = props.tr    or 0
+    f.BorderSizePixel        = 0
+    f.Size                   = props.size  or UDim2.new(1, 0, 0, 30)
+    f.Position               = props.pos   or UDim2.new(0, 0, 0, 0)
+    f.ClipsDescendants       = props.clip  or false
+    f.ZIndex                 = props.z     or 1
+    if props.name   then f.Name   = props.name   end
+    if props.parent then f.Parent = props.parent end
+    return f
+end
+
+function U.Label(props)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Text           = props.text   or ""
+    l.TextColor3     = props.col    or T.TxtPri
+    l.Font           = props.font   or T.FontLight
+    l.TextSize       = props.sz     or T.SzBody
+    l.TextXAlignment = props.xa     or Enum.TextXAlignment.Left
+    l.TextYAlignment = props.ya     or Enum.TextYAlignment.Center
+    l.TextTruncate   = Enum.TextTruncate.AtEnd
+    l.RichText       = props.rich   or false
+    l.Size           = props.size   or UDim2.new(1, 0, 1, 0)
+    l.Position       = props.pos    or UDim2.new(0, 0, 0, 0)
+    l.ZIndex         = props.z      or 2
+    l.Name           = props.name   or "Label"
+    if props.parent then l.Parent = props.parent end
+    return l
+end
+
+function U.Button(props)
+    local b = Instance.new("TextButton")
+    b.BackgroundColor3       = props.bg    or T.SurfaceHov
+    b.BackgroundTransparency = props.tr    or 0
+    b.BorderSizePixel        = 0
+    b.Text                   = props.text  or ""
+    b.TextColor3             = props.col   or T.TxtPri
+    b.Font                   = props.font  or T.FontBold
+    b.TextSize               = props.sz    or T.SzBody
+    b.Size                   = props.size  or UDim2.new(1, 0, 0, 32)
+    b.Position               = props.pos   or UDim2.new(0, 0, 0, 0)
+    b.AutoButtonColor        = false
+    b.ZIndex                 = props.z     or 2
+    b.Name                   = props.name  or "Btn"
+    if props.parent then b.Parent = props.parent end
+    return b
+end
+
+function U.Hover(btn, n, h, nt, ht)
+    nt = nt or 0; ht = ht or 0
+    btn.MouseEnter:Connect(function()
+        U.Tween(btn, T.Fast, {BackgroundColor3 = h, BackgroundTransparency = ht})
+    end)
+    btn.MouseLeave:Connect(function()
+        U.Tween(btn, T.Fast, {BackgroundColor3 = n, BackgroundTransparency = nt})
+    end)
+end
+
+function U.Ripple(btn)
+    btn.MouseButton1Click:Connect(function()
+        local rip = Instance.new("Frame")
+        rip.BackgroundColor3       = Color3.new(1,1,1)
+        rip.BackgroundTransparency = 0.82
+        rip.BorderSizePixel        = 0
+        rip.Size                   = UDim2.new(0, 0, 0, 0)
+        rip.Position               = UDim2.new(0.5, 0, 0.5, 0)
+        rip.AnchorPoint            = Vector2.new(0.5, 0.5)
+        rip.ZIndex                 = btn.ZIndex + 1
+        rip.Parent                 = btn
+        U.Corner(rip, UDim.new(1, 0))
+        U.Tween(rip, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Size = UDim2.new(2.5, 0, 2.5, 0), BackgroundTransparency = 1})
+        task.delay(0.5, function() rip:Destroy() end)
+    end)
+end
+
+function U.FuzzyMatch(hay, needle)
+    if needle == "" then return true, 100 end
+    hay = hay:lower(); needle = needle:lower()
+    if hay == needle then return true, 200 end
+    if hay:sub(1, #needle) == needle then return true, 150 end
+    if hay:find(needle, 1, true) then return true, 100 end
+    local hi = 1
+    for i = 1, #needle do
+        local f = hay:find(needle:sub(i,i), hi, true)
+        if not f then return false, 0 end
+        hi = f + 1
+    end
+    return true, 60
+end
+
+function U.HighlightMatch(text, query)
+    if query == "" then return text end
+    local lo = text:lower()
+    local ql = query:lower()
+    local s, e = lo:find(ql, 1, true)
+    if s then
+        return text:sub(1, s-1)
+            .. '<font color="rgb(165,110,255)"><b>'
+            .. text:sub(s, e)
+            .. "</b></font>"
+            .. text:sub(e+1)
+    end
+    return text
+end
+
+function U.ParseArgs(raw)
+    local args = {}
+    for token in raw:gmatch("%S+") do
+        table.insert(args, token)
+    end
+    return args
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- COMMAND REGISTRY
+-- ══════════════════════════════════════════════════════════════
+local Registry = {
+    _cmds  = {},   -- canonical_name -> def
+    _alias = {},   -- alias -> canonical_name
+    _cats  = {},   -- category -> { name, ... }
+}
+
+Registry.CategoryDefs = {
+    Player    = { label="Player",    icon="👤", col=Color3.fromRGB(80, 180,255), order=1  },
+    Movement  = { label="Movement",  icon="🏃", col=Color3.fromRGB(0,  220,140), order=2  },
+    Visual    = { label="Visual",    icon="👁️", col=Color3.fromRGB(200,100,255), order=3  },
+    World     = { label="World",     icon="🌍", col=Color3.fromRGB(255,180,0),   order=4  },
+    Combat    = { label="Combat",    icon="⚔️", col=Color3.fromRGB(255,55, 80),  order=5  },
+    Utility   = { label="Utility",   icon="⚙️", col=Color3.fromRGB(160,155,185), order=6  },
+    Admin     = { label="Admin",     icon="🛡️", col=Color3.fromRGB(255,145,0),   order=7  },
+    Fun       = { label="Fun",       icon="🎉", col=Color3.fromRGB(255,210,60),  order=8  },
+    Debug     = { label="Debug",     icon="🐛", col=Color3.fromRGB(180,255,120), order=9  },
+    Teleport  = { label="Teleport",  icon="✨", col=Color3.fromRGB(130,80, 255), order=10 },
+    Character = { label="Character", icon="🎭", col=Color3.fromRGB(255,80, 160), order=11 },
+    Network   = { label="Network",   icon="📡", col=Color3.fromRGB(0,  200,255), order=12 },
+    Info      = { label="Info",      icon="ℹ️", col=Color3.fromRGB(120,200,255), order=13 },
+}
+
+--[[
+    Register a command. Schema:
+    {
+        name        = "speed",               -- canonical name (no colon)
+        aliases     = {"speed","spd","ws"},  -- first is canonical
+        description = "Set walkspeed",
+        category    = "Movement",
+        args        = {
+            { name="value", type="number", optional=false, default=nil, hint="16" }
+        },
+        execute     = function(args, rawInput, ctx) ... end,
+        dangerous   = false,   -- adds confirmation step
+        hidden      = false,   -- hides from search
+        usage       = ":speed 50",
+    }
+]]
+function Registry:Add(def)
+    assert(def.aliases and #def.aliases > 0, "Command needs at least one alias")
+    assert(def.execute,   "Command needs execute function")
+    assert(def.category,  "Command needs a category")
+    def.name = def.name or def.aliases[1]
+    local canon = def.aliases[1]:lower()
+    def._canon = canon
+    self._cmds[canon] = def
+    for _, alias in ipairs(def.aliases) do
+        self._alias[alias:lower()] = canon
+    end
+    if not self._cats[def.category] then
+        self._cats[def.category] = {}
+    end
+    table.insert(self._cats[def.category], canon)
+end
+
+function Registry:Get(alias)
+    local canon = self._alias[alias:lower()]
+    return canon and self._cmds[canon]
+end
+
+function Registry:Search(query, limit)
+    limit = limit or 20
+    local results = {}
+    if query == "" then
+        for canon, def in pairs(self._cmds) do
+            if not def.hidden then
+                table.insert(results, { def=def, score=50 })
+            end
+        end
+        table.sort(results, function(a,b)
+            local ao = (Registry.CategoryDefs[a.def.category] or {}).order or 99
+            local bo = (Registry.CategoryDefs[b.def.category] or {}).order or 99
+            if ao ~= bo then return ao < bo end
+            return a.def._canon < b.def._canon
+        end)
+    else
+        for canon, def in pairs(self._cmds) do
+            if not def.hidden then
+                local bestScore = 0
+                for _, alias in ipairs(def.aliases) do
+                    local match, score = U.FuzzyMatch(alias, query)
+                    if match and score > bestScore then bestScore = score end
+                end
+                local descMatch, descScore = U.FuzzyMatch(def.description or "", query)
+                if descMatch and descScore * 0.4 > bestScore then
+                    bestScore = math.floor(descScore * 0.4)
+                end
+                if bestScore > 0 then
+                    table.insert(results, { def=def, score=bestScore })
+                end
+            end
+        end
+        table.sort(results, function(a,b) return a.score > b.score end)
+    end
+    local out = {}
+    for i = 1, math.min(#results, limit) do
+        table.insert(out, results[i].def)
+    end
+    return out
+end
+
+function Registry:All()
+    local out = {}
+    for _, def in pairs(self._cmds) do
+        if not def.hidden then table.insert(out, def) end
+    end
+    return out
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- NOTIFICATION SYSTEM
+-- ══════════════════════════════════════════════════════════════
+local Notif = {}
+local notifHolder
+
+function Notif.Init(screenGui)
+    notifHolder = Instance.new("Frame")
+    notifHolder.BackgroundTransparency = 1
+    notifHolder.Size     = UDim2.new(0, 320, 1, 0)
+    notifHolder.Position = UDim2.new(1, -330, 0, 0)
+    notifHolder.ZIndex   = 50
+    notifHolder.Name     = "NotifHolder"
+    notifHolder.Parent   = screenGui
+    U.List(notifHolder, Enum.FillDirection.Vertical, 8, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top)
+    U.Pad(notifHolder, 12, 0, 0, 0)
+end
+
+function Notif.Push(msg, kind, duration)
+    duration = duration or 3.5
+    kind = kind or "info"
+
+    local accentCol = ({
+        info    = T.Cyan,
+        success = T.Green,
+        warn    = T.Yellow,
+        error   = T.Red,
+    })[kind] or T.Cyan
+
+    local icon = ({
+        info    = "ℹ",
+        success = "✓",
+        warn    = "⚠",
+        error   = "✕",
+    })[kind] or "ℹ"
+
+    local card = Instance.new("Frame")
+    card.BackgroundColor3       = T.Surface
+    card.BackgroundTransparency = T.BGTrans
+    card.BorderSizePixel        = 0
+    card.Size                   = UDim2.new(1, 0, 0, 52)
+    card.ClipsDescendants        = true
+    card.ZIndex                 = 50
+    card.Name                   = "Notif"
+
+    U.Corner(card, T.R)
+    U.Stroke(card, T.Border, 2)
+
+    -- Left accent bar
+    local bar = Instance.new("Frame")
+    bar.BackgroundColor3 = accentCol
+    bar.BorderSizePixel  = 0
+    bar.Size             = UDim2.new(0, 3, 1, 0)
+    bar.Position         = UDim2.new(0, 0, 0, 0)
+    bar.ZIndex           = 51
+    bar.Parent           = card
+    U.Corner(bar, UDim.new(0,3))
+
+    -- Icon
+    local iconLbl = U.Label({
+        text   = icon,
+        col    = accentCol,
+        font   = T.FontBold,
+        sz     = 16,
+        size   = UDim2.new(0, 28, 1, 0),
+        pos    = UDim2.new(0, 12, 0, 0),
+        z      = 51,
+        parent = card,
+    })
+
+    -- Message
+    local msgLbl = U.Label({
+        text   = msg,
+        col    = T.TxtPri,
+        font   = T.FontMed,
+        sz     = T.SzBody,
+        size   = UDim2.new(1, -50, 1, 0),
+        pos    = UDim2.new(0, 42, 0, 0),
+        z      = 51,
+        parent = card,
+    })
+    msgLbl.TextWrapped = true
+
+    -- Progress bar
+    local prog = Instance.new("Frame")
+    prog.BackgroundColor3 = accentCol
+    prog.BorderSizePixel  = 0
+    prog.Size             = UDim2.new(1, 0, 0, 2)
+    prog.Position         = UDim2.new(0, 0, 1, -2)
+    prog.ZIndex           = 52
+    prog.Parent           = card
+
+    card.Parent = notifHolder
+    card.Position = UDim2.new(1, 20, 0, 0)
+    card.BackgroundTransparency = 1
+
+    U.Tween(card, T.Med, {Position = UDim2.new(0,0,0,0), BackgroundTransparency = T.BGTrans})
+    U.Tween(prog, TweenInfo.new(duration, Enum.EasingStyle.Linear), {Size = UDim2.new(0,0,0,2)})
+
+    task.delay(duration, function()
+        U.Tween(card, T.Med, {Position = UDim2.new(1, 20, 0, 0), BackgroundTransparency = 1})
+        task.delay(0.25, function() card:Destroy() end)
+    end)
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- HISTORY
+-- ══════════════════════════════════════════════════════════════
+local History = {
+    _log    = {},
+    _cursor = 0,
+    MaxSize = 200,
+}
+
+function History:Push(input)
+    if input == "" then return end
+    if self._log[#self._log] == input then return end
+    table.insert(self._log, input)
+    if #self._log > self.MaxSize then
+        table.remove(self._log, 1)
+    end
+    self._cursor = #self._log + 1
+end
+
+function History:Prev()
+    self._cursor = math.max(1, self._cursor - 1)
+    return self._log[self._cursor] or ""
+end
+
+function History:Next()
+    self._cursor = math.min(#self._log + 1, self._cursor + 1)
+    return self._log[self._cursor] or ""
+end
+
+function History:ResetCursor()
+    self._cursor = #self._log + 1
+end
+
+function History:GetAll()
+    return self._log
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- GUI CONSTRUCTION
+-- ══════════════════════════════════════════════════════════════
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name                  = "ApexAdminGui"
+ScreenGui.ResetOnSpawn          = false
+ScreenGui.ZIndexBehavior        = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset        = true
+ScreenGui.DisplayOrder          = 100
+ScreenGui.Parent                = PGui
+
+Notif.Init(ScreenGui)
+
+-- ── Main panel container ──────────────────────────────────────
+local PanelRoot = Instance.new("Frame")
+PanelRoot.Name                  = "PanelRoot"
+PanelRoot.BackgroundTransparency = 1
+PanelRoot.Size                  = UDim2.new(0, T.PanelW, 0, T.PanelH)
+PanelRoot.Position              = UDim2.new(0.5, -math.floor(T.PanelW/2), 0.08, 0)
+PanelRoot.ZIndex                = 10
+PanelRoot.Parent                = ScreenGui
+
+-- Drop shadow (layered frames)
+for i = 1, 4 do
+    local sh = Instance.new("Frame")
+    sh.BackgroundColor3       = Color3.new(0,0,0)
+    sh.BackgroundTransparency = 0.65 + i * 0.07
+    sh.BorderSizePixel        = 0
+    sh.Size                   = UDim2.new(1, i*6, 1, i*6)
+    sh.Position               = UDim2.new(0, -i*3, 0, i*2)
+    sh.ZIndex                 = 9
+    sh.Name                   = "Shadow"
+    U.Corner(sh, T.RLg)
+    sh.Parent = PanelRoot
+end
+
+-- Main background
+local Panel = U.Frame({
+    name   = "Panel",
+    bg     = T.BG,
+    tr     = T.BGTrans,
+    size   = UDim2.new(1, 0, 1, 0),
+    clip   = true,
+    z      = 10,
+    parent = PanelRoot,
+})
+U.Corner(Panel, T.RLg)
+U.Stroke(Panel, T.Border, 2)
+
+-- Subtle top gradient
+local topGrad = Instance.new("Frame")
+topGrad.BackgroundColor3       = T.Violet
+topGrad.BackgroundTransparency = 0.88
+topGrad.BorderSizePixel        = 0
+topGrad.Size                   = UDim2.new(1, 0, 0, 2)
+topGrad.Position               = UDim2.new(0, 0, 0, 0)
+topGrad.ZIndex                 = 11
+topGrad.Name                   = "TopAccent"
+topGrad.Parent                 = Panel
+
+-- ── Title bar ────────────────────────────────────────────────
+local TitleBar = U.Frame({
+    name   = "TitleBar",
+    bg     = T.BGAlt,
+    tr     = 0.05,
+    size   = UDim2.new(1, 0, 0, T.BarH),
+    z      = 11,
+    parent = Panel,
+})
+
+-- Logo dot cluster
+local logoDots = Instance.new("Frame")
+logoDots.BackgroundTransparency = 1
+logoDots.Size                   = UDim2.new(0, 48, 0, T.BarH)
+logoDots.Position               = UDim2.new(0, 0, 0, 0)
+logoDots.ZIndex                 = 12
+logoDots.Parent                 = TitleBar
+
+local dotColors = {T.Red, T.Yellow, T.Green}
+for i, dc in ipairs(dotColors) do
+    local dot = Instance.new("Frame")
+    dot.BackgroundColor3 = dc
+    dot.BorderSizePixel  = 0
+    dot.Size             = UDim2.new(0, 10, 0, 10)
+    dot.Position         = UDim2.new(0, 10 + (i-1)*14, 0.5, -5)
+    dot.ZIndex           = 12
+    U.Corner(dot, UDim.new(1, 0))
+    dot.Parent = logoDots
+end
+
+-- Title text
+U.Label({
+    text   = "APEX ADMIN",
+    col    = T.TxtPri,
+    font   = T.FontBold,
+    sz     = T.SzTitle,
+    size   = UDim2.new(1, -120, 1, 0),
+    pos    = UDim2.new(0, 56, 0, 0),
+    z      = 12,
+    parent = TitleBar,
+})
+
+-- Version badge
+local verBadge = U.Frame({
+    name   = "VerBadge",
+    bg     = T.Violet,
+    tr     = 0.65,
+    size   = UDim2.new(0, 32, 0, 16),
+    pos    = UDim2.new(0, 152, 0.5, -8),
+    z      = 12,
+    parent = TitleBar,
+})
+U.Corner(verBadge, T.RPill)
+U.Label({text="v1.0",col=T.TxtPri,font=T.FontBold,sz=9,
+    size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=13, parent=verBadge})
+
+-- Window controls (minimize / close)
+local ctrlW = 28
+local function MakeCtrl(icon, col, xOff)
+    local btn = U.Button({
+        bg   = col,
+        tr   = 0.7,
+        size = UDim2.new(0, ctrlW, 0, ctrlW),
+        pos  = UDim2.new(1, xOff, 0.5, -math.floor(ctrlW/2)),
+        text = "",
+        z    = 13,
+        parent = TitleBar,
+    })
+    U.Corner(btn, UDim.new(1, 0))
+    U.Stroke(btn, T.Border, 1.5)
+    U.Label({text=icon, col=Color3.new(1,1,1), font=T.FontBold, sz=12,
+        size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=14, parent=btn})
+    U.Hover(btn, col, Color3.new(1,1,1), 0.7, 0.4)
+    return btn
+end
+
+local CloseBtn    = MakeCtrl("✕", T.Red,    -14)
+local MinimizeBtn = MakeCtrl("−", T.Yellow, -48)
+local HelpBtn     = MakeCtrl("?", T.Cyan,   -82)
+
+-- ── Search bar ───────────────────────────────────────────────
+local SearchBarHolder = U.Frame({
+    name   = "SearchBar",
+    bg     = T.Surface,
+    tr     = T.SurfTrans,
+    size   = UDim2.new(1, -24, 0, 36),
+    pos    = UDim2.new(0, 12, 0, T.BarH + 10),
+    clip   = false,
+    z      = 11,
+    parent = Panel,
+})
+U.Corner(SearchBarHolder, T.R)
+U.Stroke(SearchBarHolder, T.Border, 2)
+
+-- Accent line on focus
+local SearchAccent = Instance.new("Frame")
+SearchAccent.BackgroundColor3       = T.Violet
+SearchAccent.BackgroundTransparency = 0.4
+SearchAccent.BorderSizePixel        = 0
+SearchAccent.Size                   = UDim2.new(0, 0, 0, 2)
+SearchAccent.Position               = UDim2.new(0, 0, 1, -1)
+SearchAccent.ZIndex                 = 13
+SearchAccent.Name                   = "Accent"
+U.Corner(SearchAccent, UDim.new(0,2))
+SearchAccent.Parent = SearchBarHolder
+
+-- Search icon
+U.Label({text="⌕", col=T.TxtDim, font=T.FontBold, sz=18,
+    size=UDim2.new(0,34,1,0), xa=Enum.TextXAlignment.Center, z=12, parent=SearchBarHolder})
+
+-- TextBox
+local SearchBox = Instance.new("TextBox")
+SearchBox.BackgroundTransparency = 1
+SearchBox.PlaceholderText        = "Search commands or type :command ..."
+SearchBox.PlaceholderColor3      = T.TxtDim
+SearchBox.Text                   = ""
+SearchBox.TextColor3             = T.TxtInput
+SearchBox.Font                   = T.FontMono
+SearchBox.TextSize               = T.SzInput
+SearchBox.TextXAlignment         = Enum.TextXAlignment.Left
+SearchBox.ClearTextOnFocus       = false
+SearchBox.Size                   = UDim2.new(1, -80, 1, 0)
+SearchBox.Position               = UDim2.new(0, 34, 0, 0)
+SearchBox.ZIndex                 = 12
+SearchBox.Name                   = "Input"
+SearchBox.Parent                 = SearchBarHolder
+
+-- Keyboard shortcut hint
+U.Label({text="↵ Run", col=T.TxtDim, font=T.FontLight, sz=T.SzSmall,
+    size=UDim2.new(0,46,1,0), pos=UDim2.new(1,-46,0,0),
+    xa=Enum.TextXAlignment.Right, z=12, parent=SearchBarHolder})
+
+-- ── Autocomplete dropdown ─────────────────────────────────────
+local DropFrame = U.Frame({
+    name   = "Dropdown",
+    bg     = T.BGAlt,
+    tr     = 0.04,
+    size   = UDim2.new(1, 0, 0, 0),
+    pos    = UDim2.new(0, 0, 1, 4),
+    clip   = true,
+    z      = 20,
+    parent = SearchBarHolder,
+})
+U.Corner(DropFrame, T.R)
+U.Stroke(DropFrame, T.Border, 2)
+
+local DropScroll = Instance.new("ScrollingFrame")
+DropScroll.BackgroundTransparency = 1
+DropScroll.BorderSizePixel        = 0
+DropScroll.Size                   = UDim2.new(1, 0, 1, 0)
+DropScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+DropScroll.ScrollBarThickness     = 3
+DropScroll.ScrollBarImageColor3   = T.Violet
+DropScroll.ZIndex                 = 21
+DropScroll.Name                   = "Scroll"
+DropScroll.Parent                 = DropFrame
+U.List(DropScroll, Enum.FillDirection.Vertical, 2)
+U.Pad(DropScroll, 4, 4, 6, 6)
+
+local selectedDropIdx = 1
+local dropItems = {}
+
+-- ── Category tabs ─────────────────────────────────────────────
+local TabBar = U.Frame({
+    name   = "TabBar",
+    bg     = T.BGAlt,
+    tr     = 0.06,
+    size   = UDim2.new(1, -24, 0, 34),
+    pos    = UDim2.new(0, 12, 0, T.BarH + 56),
+    z      = 11,
+    parent = Panel,
+})
+U.Corner(TabBar, T.R)
+U.Stroke(TabBar, T.Border, 2)
+
+local TabScroll = Instance.new("ScrollingFrame")
+TabScroll.BackgroundTransparency = 1
+TabScroll.BorderSizePixel        = 0
+TabScroll.Size                   = UDim2.new(1, 0, 1, 0)
+TabScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+TabScroll.ScrollBarThickness     = 0
+TabScroll.ZIndex                 = 12
+TabScroll.Name                   = "TabScroll"
+TabScroll.ScrollingDirection     = Enum.ScrollingDirection.X
+TabScroll.Parent                 = TabBar
+U.List(TabScroll, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+U.Pad(TabScroll, 0, 0, 6, 6)
+
+-- ── Command list area ─────────────────────────────────────────
+local ListFrame = U.Frame({
+    name   = "CommandList",
+    bg     = T.BGAlt,
+    tr     = 0.06,
+    size   = UDim2.new(1, -24, 1, -(T.BarH + 56 + 34 + 60 + 24)),
+    pos    = UDim2.new(0, 12, 0, T.BarH + 56 + 34 + 8),
+    clip   = true,
+    z      = 11,
+    parent = Panel,
+})
+U.Corner(ListFrame, T.R)
+U.Stroke(ListFrame, T.Border, 2)
+
+local CmdScroll = Instance.new("ScrollingFrame")
+CmdScroll.BackgroundTransparency = 1
+CmdScroll.BorderSizePixel        = 0
+CmdScroll.Size                   = UDim2.new(1, 0, 1, 0)
+CmdScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+CmdScroll.ScrollBarThickness     = 3
+CmdScroll.ScrollBarImageColor3   = T.Violet
+CmdScroll.ZIndex                 = 12
+CmdScroll.Name                   = "CmdScroll"
+CmdScroll.Parent                 = ListFrame
+U.List(CmdScroll, Enum.FillDirection.Vertical, 2)
+U.Pad(CmdScroll, 4, 4, 6, 6)
+
+-- ── Status bar ────────────────────────────────────────────────
+local StatusBar = U.Frame({
+    name   = "StatusBar",
+    bg     = T.BGAlt,
+    tr     = 0.05,
+    size   = UDim2.new(1, -24, 0, 28),
+    pos    = UDim2.new(0, 12, 1, -40),
+    z      = 11,
+    parent = Panel,
+})
+U.Corner(StatusBar, T.R)
+U.Stroke(StatusBar, T.Border, 2)
+U.Pad(StatusBar, 0, 0, 10, 10)
+
+local StatusLabel = U.Label({
+    text   = "Apex Admin  ·  Ready",
+    col    = T.TxtDim,
+    font   = T.FontLight,
+    sz     = T.SzSmall,
+    z      = 12,
+    parent = StatusBar,
+})
+
+local CmdCountLabel = U.Label({
+    text   = "0 commands",
+    col    = T.TxtDim,
+    font   = T.FontLight,
+    sz     = T.SzSmall,
+    xa     = Enum.TextXAlignment.Right,
+    z      = 12,
+    parent = StatusBar,
+})
+
+-- ══════════════════════════════════════════════════════════════
+-- MINIMIZED BAR  (top-center pill when panel is closed)
+-- ══════════════════════════════════════════════════════════════
+local MinBar = Instance.new("Frame")
+MinBar.Name                   = "MinBar"
+MinBar.BackgroundColor3       = T.BG
+MinBar.BackgroundTransparency = T.MinBarTrans
+MinBar.BorderSizePixel        = 0
+MinBar.Size                   = UDim2.new(0, T.MinBarW, 0, T.MinBarH)
+MinBar.Position               = UDim2.new(0.5, -math.floor(T.MinBarW/2), 0, 6)
+MinBar.ZIndex                 = 10
+MinBar.Visible                = false
+MinBar.Parent                 = ScreenGui
+U.Corner(MinBar, T.RPill)
+U.Stroke(MinBar, T.Border, 2)
+
+-- Glow behind minbar
+local minGlow = Instance.new("ImageLabel")
+minGlow.BackgroundTransparency = 1
+minGlow.Image                  = "rbxassetid://5028857084"
+minGlow.ImageColor3            = T.Violet
+minGlow.ImageTransparency      = 0.80
+minGlow.Size                   = UDim2.new(1, 60, 1, 30)
+minGlow.Position               = UDim2.new(0, -30, 0, -15)
+minGlow.ZIndex                 = 9
+minGlow.Parent                 = MinBar
+
+-- Accent dot
+local minDot = Instance.new("Frame")
+minDot.BackgroundColor3 = T.Violet
+minDot.BorderSizePixel  = 0
+minDot.Size             = UDim2.new(0, 8, 0, 8)
+minDot.Position         = UDim2.new(0, 10, 0.5, -4)
+minDot.ZIndex           = 11
+U.Corner(minDot, UDim.new(1,0))
+minDot.Parent = MinBar
+
+-- MinBar input
+local MinInput = Instance.new("TextBox")
+MinInput.BackgroundTransparency = 1
+MinInput.PlaceholderText        = ":command  or  search..."
+MinInput.PlaceholderColor3      = T.TxtDim
+MinInput.Text                   = ""
+MinInput.TextColor3             = T.TxtInput
+MinInput.Font                   = T.FontMono
+MinInput.TextSize               = T.SzBody
+MinInput.TextXAlignment         = Enum.TextXAlignment.Left
+MinInput.ClearTextOnFocus       = false
+MinInput.Size                   = UDim2.new(1, -60, 1, 0)
+MinInput.Position               = UDim2.new(0, 24, 0, 0)
+MinInput.ZIndex                 = 11
+MinInput.Name                   = "MinInput"
+MinInput.Parent                 = MinBar
+
+-- Expand arrow in minbar
+local expandBtn = U.Button({
+    bg   = T.Violet,
+    tr   = 0.6,
+    size = UDim2.new(0, 26, 0, 20),
+    pos  = UDim2.new(1, -32, 0.5, -10),
+    text = "▲",
+    col  = T.TxtPri,
+    sz   = 10,
+    z    = 12,
+    parent = MinBar,
+})
+U.Corner(expandBtn, T.R)
+U.Stroke(expandBtn, T.Border, 1.5)
+
+-- ══════════════════════════════════════════════════════════════
+-- DRAG & RESIZE
+-- ══════════════════════════════════════════════════════════════
+local function MakeDraggable(handle, target)
+    local dragging, dragStart, startPos
+    handle.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = target.Position
+        end
+    end)
+    handle.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+        or inp.UserInputType == Enum.UserInputType.Touch) then
+            local delta = inp.Position - dragStart
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- Resize grip (bottom-right corner)
+local ResizeGrip = Instance.new("TextButton")
+ResizeGrip.BackgroundColor3       = T.Violet
+ResizeGrip.BackgroundTransparency = 0.75
+ResizeGrip.BorderSizePixel        = 0
+ResizeGrip.Size                   = UDim2.new(0, T.ResizeGrip, 0, T.ResizeGrip)
+ResizeGrip.Position               = UDim2.new(1, -T.ResizeGrip, 1, -T.ResizeGrip)
+ResizeGrip.Text                   = ""
+ResizeGrip.ZIndex                 = 15
+ResizeGrip.Name                   = "Resize"
+U.Corner(ResizeGrip, UDim.new(0,3))
+ResizeGrip.Parent = Panel
+
+do
+    local resizing, resStart, resSize
+    ResizeGrip.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = true
+            resStart = Vector2.new(inp.Position.X, inp.Position.Y)
+            resSize  = Vector2.new(PanelRoot.Size.X.Offset, PanelRoot.Size.Y.Offset)
+        end
+    end)
+    ResizeGrip.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if resizing and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = Vector2.new(inp.Position.X, inp.Position.Y) - resStart
+            local nw    = math.max(420, resSize.X + delta.X)
+            local nh    = math.max(320, resSize.Y + delta.Y)
+            PanelRoot.Size = UDim2.new(0, nw, 0, nh)
+        end
+    end)
+end
+
+MakeDraggable(TitleBar, PanelRoot)
+MakeDraggable(MinBar, MinBar)
+
+-- ══════════════════════════════════════════════════════════════
+-- VISIBILITY CONTROLLER
+-- ══════════════════════════════════════════════════════════════
+local GuiVisible = true
+
+local function SetVisible(vis)
+    GuiVisible = vis
+    if vis then
+        PanelRoot.Visible = true
+        MinBar.Visible    = false
+        U.Tween(Panel, T.Med, {BackgroundTransparency = T.BGTrans})
+        U.Tween(PanelRoot, T.Bounce, {
+            Size     = UDim2.new(0, PanelRoot.Size.X.Offset, 0, PanelRoot.Size.Y.Offset),
+            Position = PanelRoot.Position,
+        })
+        task.defer(function() SearchBox:CaptureFocus() end)
+    else
+        MinBar.Visible    = true
+        U.Tween(Panel, T.Med, {BackgroundTransparency = 1})
+        task.delay(0.22, function()
+            if not GuiVisible then PanelRoot.Visible = false end
+        end)
+    end
+end
+
+MinimizeBtn.MouseButton1Click:Connect(function() SetVisible(false) end)
+CloseBtn.MouseButton1Click:Connect(function()
+    U.Tween(Panel, T.Med, {BackgroundTransparency = 1})
+    task.delay(0.25, function() PanelRoot.Visible = false; MinBar.Visible = false end)
+    GuiVisible = false
+end)
+expandBtn.MouseButton1Click:Connect(function() SetVisible(true) end)
+
+-- ══════════════════════════════════════════════════════════════
+-- CATEGORY TAB BUILDER
+-- ══════════════════════════════════════════════════════════════
+local activeTab    = "All"
+local tabButtons   = {}
+
+local function BuildTabs()
+    for _, ch in ipairs(TabScroll:GetChildren()) do
+        if ch:IsA("TextButton") then ch:Destroy() end
+    end
+    tabButtons = {}
+
+    local tabList = {
+        { key="All", label="All", icon="★", col=T.Violet }
+    }
+    local sortedCats = {}
+    for catKey, catDef in pairs(Registry.CategoryDefs) do
+        if Registry._cats[catKey] and #Registry._cats[catKey] > 0 then
+            table.insert(sortedCats, { key=catKey, def=catDef })
+        end
+    end
+    table.sort(sortedCats, function(a,b) return a.def.order < b.def.order end)
+    for _, c in ipairs(sortedCats) do
+        table.insert(tabList, { key=c.key, label=c.def.label, icon=c.def.icon, col=c.def.col })
+    end
+
+    for _, tab in ipairs(tabList) do
+        local labelW = U.TextWidth(tab.icon.." "..tab.label, T.FontBold, T.SzSmall)
+        local btnW   = math.max(56, labelW + 20)
+
+        local btn = U.Button({
+            bg   = tab.key == activeTab and T.Violet or T.Surface,
+            tr   = tab.key == activeTab and 0.65    or T.SurfTrans,
+            size = UDim2.new(0, btnW, 0, 24),
+            text = tab.icon .. " " .. tab.label,
+            col  = tab.key == activeTab and T.TxtPri or T.TxtSec,
+            font = T.FontBold,
+            sz   = T.SzSmall,
+            z    = 13,
+        })
+        U.Corner(btn, T.RPill)
+        U.Stroke(btn, T.Border, 1.5)
+        U.Ripple(btn)
+
+        btn.MouseButton1Click:Connect(function()
+            activeTab = tab.key
+            BuildTabs()
+            -- rebuild command list for new tab
+            BuildCommandList(SearchBox.Text)
+        end)
+        btn.LayoutOrder = tab.key == "All" and 0 or tab.def and tab.def.order or 99
+        btn.Parent = TabScroll
+        tabButtons[tab.key] = btn
+    end
+
+    -- recalc canvas
+    local total = 0
+    for _, ch in ipairs(TabScroll:GetChildren()) do
+        if ch:IsA("TextButton") then total = total + ch.Size.X.Offset + 4 end
+    end
+    TabScroll.CanvasSize = UDim2.new(0, total + 12, 0, 0)
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- COMMAND LIST RENDERER
+-- ══════════════════════════════════════════════════════════════
+function BuildCommandList(query)
+    query = query or SearchBox.Text
+    -- strip leading colon for search
+    local cleanQuery = query:match("^:?(.*)") or ""
+
+    for _, ch in ipairs(CmdScroll:GetChildren()) do
+        if ch:IsA("Frame") or ch:IsA("TextButton") then ch:Destroy() end
+    end
+
+    local results = Registry:Search(cleanQuery, 60)
+
+    -- filter by tab
+    if activeTab ~= "All" then
+        local filtered = {}
+        for _, def in ipairs(results) do
+            if def.category == activeTab then
+                table.insert(filtered, def)
+            end
+        end
+        results = filtered
+    end
+
+    if #results == 0 then
+        U.Label({
+            text   = "No commands found.",
+            col    = T.TxtDim,
+            font   = T.FontLight,
+            sz     = T.SzBody,
+            size   = UDim2.new(1, 0, 0, 40),
+            xa     = Enum.TextXAlignment.Center,
+            z      = 13,
+            parent = CmdScroll,
+        })
+        CmdScroll.CanvasSize = UDim2.new(0, 0, 0, 40)
+        return
+    end
+
+    local totalH = 0
+    for i, def in ipairs(results) do
+        local catDef  = Registry.CategoryDefs[def.category] or {}
+        local accentC = catDef.col or T.Violet
+        local icon    = catDef.icon or "◆"
+
+        local row = U.Frame({
+            name   = "Row_"..i,
+            bg     = T.Surface,
+            tr     = T.SurfTrans,
+            size   = UDim2.new(1, -4, 0, 48),
+            z      = 13,
+            clip   = false,
+            parent = CmdScroll,
+        })
+        row.LayoutOrder = i
+        U.Corner(row, T.R)
+        U.Stroke(row, T.Border, 1.5)
+
+        -- Left accent bar
+        local accBar = Instance.new("Frame")
+        accBar.BackgroundColor3 = accentC
+        accBar.BorderSizePixel  = 0
+        accBar.Size             = UDim2.new(0, 3, 1, 0)
+        accBar.Position         = UDim2.new(0, 0, 0, 0)
+        accBar.ZIndex           = 14
+        U.Corner(accBar, UDim.new(0,3))
+        accBar.Parent = row
+
+        -- Category icon
+        U.Label({
+            text   = icon,
+            col    = accentC,
+            font   = T.FontBold,
+            sz     = 14,
+            size   = UDim2.new(0, 32, 1, 0),
+            pos    = UDim2.new(0, 8, 0, 0),
+            xa     = Enum.TextXAlignment.Center,
+            z      = 14,
+            parent = row,
+        })
+
+        -- Command name (highlighted)
+        local displayName = ":"..def.aliases[1]
+        local nameLbl = U.Label({
+            text   = U.HighlightMatch(displayName, ":"..cleanQuery),
+            col    = T.TxtPri,
+            font   = T.FontBold,
+            sz     = T.SzBody,
+            size   = UDim2.new(0.5, -40, 0, 22),
+            pos    = UDim2.new(0, 42, 0, 4),
+            rich   = true,
+            z      = 14,
+            parent = row,
+        })
+
+        -- Aliases (small)
+        if #def.aliases > 1 then
+            local aliasStr = table.concat({table.unpack(def.aliases, 2, math.min(#def.aliases, 4))}, "  :")
+            U.Label({
+                text   = ":"..aliasStr,
+                col    = T.TxtDim,
+                font   = T.FontLight,
+                sz     = T.SzSmall,
+                size   = UDim2.new(0.4, 0, 0, 16),
+                pos    = UDim2.new(0, 42, 0, 26),
+                z      = 14,
+                parent = row,
+            })
+        end
+
+        -- Description
+        U.Label({
+            text   = def.description or "",
+            col    = T.TxtSec,
+            font   = T.FontLight,
+            sz     = T.SzSmall,
+            size   = UDim2.new(0.5, -10, 1, 0),
+            pos    = UDim2.new(0.5, 0, 0, 0),
+            z      = 14,
+            parent = row,
+        })
+
+        -- Category badge
+        local badgeW = U.TextWidth(def.category, T.FontBold, T.SzTag) + 14
+        local badge  = U.Frame({
+            bg   = accentC,
+            tr   = 0.72,
+            size = UDim2.new(0, badgeW, 0, 16),
+            pos  = UDim2.new(1, -(badgeW+10), 0.5, -8),
+            z    = 14,
+            parent = row,
+        })
+        U.Corner(badge, T.RPill)
+        U.Label({text=def.category, col=T.TxtPri, font=T.FontBold, sz=T.SzTag,
+            size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=15, parent=badge})
+
+        -- Hover
+        U.Hover(row, T.Surface, T.SurfaceHov, T.SurfTrans, 0)
+
+        -- Click to insert command in searchbox
+        local clickArea = U.Button({
+            bg   = Color3.new(0,0,0),
+            tr   = 1,
+            size = UDim2.new(1, 0, 1, 0),
+            z    = 15,
+            parent = row,
+        })
+        clickArea.MouseButton1Click:Connect(function()
+            SearchBox.Text = ":"..def.aliases[1].." "
+            SearchBox:CaptureFocus()
+            SearchBox.CursorPosition = #SearchBox.Text + 1
+        end)
+
+        totalH = totalH + 50
+    end
+
+    CmdScroll.CanvasSize = UDim2.new(0, 0, 0, totalH + 8)
+    CmdCountLabel.Text = #results .. " commands"
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- AUTOCOMPLETE DROPDOWN LOGIC
+-- ══════════════════════════════════════════════════════════════
+local function HideDropdown()
+    U.Tween(DropFrame, T.Fast, {Size = UDim2.new(1, 0, 0, 0)})
+    selectedDropIdx = 1
+end
+
+local function ShowDropdown(defs)
+    for _, ch in ipairs(DropScroll:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    dropItems = defs
+
+    if #defs == 0 then HideDropdown(); return end
+
+    local rowH   = 36
+    local maxVis = math.min(#defs, 7)
+    local totalH = rowH * #defs + 8
+
+    for i, def in ipairs(defs) do
+        local catDef = Registry.CategoryDefs[def.category] or {}
+        local row    = U.Button({
+            bg   = i == selectedDropIdx and T.SurfaceSel or T.Surface,
+            tr   = i == selectedDropIdx and 0           or T.SurfTrans,
+            size = UDim2.new(1, 0, 0, rowH),
+            text = "",
+            z    = 22,
+        })
+        row.LayoutOrder = i
+        U.Corner(row, T.R)
+
+        local nameStr = ":"..def.aliases[1]
+        if #def.args > 0 then
+            local argHints = {}
+            for _, a in ipairs(def.args) do
+                table.insert(argHints, a.optional and "["..a.name.."]" or "<"..a.name..">")
+            end
+            nameStr = nameStr .. " " .. table.concat(argHints, " ")
+        end
+
+        U.Label({text=(catDef.icon or "◆"), col=catDef.col or T.Violet, font=T.FontBold, sz=13,
+            size=UDim2.new(0,26,1,0), pos=UDim2.new(0,6,0,0), xa=Enum.TextXAlignment.Center, z=23, parent=row})
+        U.Label({text=nameStr, col=T.TxtPri, font=T.FontMono, sz=T.SzBody,
+            size=UDim2.new(0.6,-32,1,0), pos=UDim2.new(0,32,0,0), z=23, parent=row})
+        U.Label({text=def.description or "", col=T.TxtSec, font=T.FontLight, sz=T.SzSmall,
+            size=UDim2.new(0.4,0,1,0), pos=UDim2.new(0.6,0,0,0), z=23, parent=row})
+
+        row.MouseButton1Click:Connect(function()
+            SearchBox.Text = ":"..def.aliases[1].." "
+            SearchBox.CursorPosition = #SearchBox.Text + 1
+            HideDropdown()
+        end)
+
+        U.Hover(row,
+            i == selectedDropIdx and T.SurfaceSel or T.Surface,
+            T.SurfaceHov,
+            i == selectedDropIdx and 0 or T.SurfTrans, 0)
+
+        row.Parent = DropScroll
+    end
+
+    DropScroll.CanvasSize = UDim2.new(0, 0, 0, totalH)
+    local visH = math.min(maxVis * rowH + 8, T.DropMaxH)
+    U.Tween(DropFrame, T.Med, {Size = UDim2.new(1, 0, 0, visH)})
+end
+
+local function UpdateDropSelection(idx)
+    selectedDropIdx = math.max(1, math.min(#dropItems, idx))
+    for i, ch in ipairs(DropScroll:GetChildren()) do
+        if ch:IsA("TextButton") then
+            local isSel = i == selectedDropIdx
+            U.Tween(ch, T.Fast, {
+                BackgroundColor3       = isSel and T.SurfaceSel or T.Surface,
+                BackgroundTransparency = isSel and 0            or T.SurfTrans,
+            })
+        end
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- COMMAND EXECUTOR
+-- ══════════════════════════════════════════════════════════════
+local function ExecCommand(rawInput)
+    rawInput = rawInput:match("^%s*(.-)%s*$")  -- trim
+    if rawInput == "" then return end
+
+    History:Push(rawInput)
+    History:ResetCursor()
+
+    local stripped = rawInput:match("^:(.+)") or rawInput
+    local tokens   = U.ParseArgs(stripped)
+    if #tokens == 0 then return end
+
+    local cmdKey  = tokens[1]:lower()
+    local cmdArgs = { table.unpack(tokens, 2) }
+
+    local def = Registry:Get(cmdKey)
+    if not def then
+        Notif.Push("Unknown command: :"..cmdKey, "error", 3)
+        StatusLabel.Text = "Unknown: :"..cmdKey
+        return
+    end
+
+    StatusLabel.Text = "Ran: :"..def.aliases[1]
+
+    local ok, err = pcall(def.execute, cmdArgs, rawInput, {
+        player  = LP,
+        notif   = Notif,
+        registry = Registry,
+    })
+
+    if not ok then
+        Notif.Push("Error: "..tostring(err), "error", 4)
+        StatusLabel.Text = "Error in :"..def.aliases[1]
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- SEARCH / INPUT WIRING
+-- ══════════════════════════════════════════════════════════════
+local function HandleInput(text)
+    local stripped = text:match("^:?(.*)") or ""
+
+    if text:sub(1,1) == ":" and #stripped > 0 then
+        -- show autocomplete
+        local matches = Registry:Search(stripped, 8)
+        ShowDropdown(matches)
+    else
+        HideDropdown()
+    end
+
+    BuildCommandList(text)
+end
+
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    HandleInput(SearchBox.Text)
+end)
+
+SearchBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local text = SearchBox.Text:match("^%s*(.-)%s*$")
+        if text:sub(1,1) == ":" then
+            -- if item selected in dropdown, use that
+            if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
+                ExecCommand(":"..dropItems[selectedDropIdx].aliases[1])
+            else
+                ExecCommand(text)
+            end
+        end
+        SearchBox.Text = ""
+        HideDropdown()
+        BuildCommandList("")
+    else
+        HideDropdown()
+    end
+end)
+
+-- Focus line animation
+SearchBox.Focused:Connect(function()
+    U.Tween(SearchAccent, T.Med, {Size = UDim2.new(1, 0, 0, 2)})
+    U.Tween(SearchBarHolder, T.Med, {})
+end)
+
+-- Keyboard navigation
+UserInputService.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+
+    -- Toggle panel: F2
+    if inp.KeyCode == Enum.KeyCode.F2 then
+        if PanelRoot.Visible or MinBar.Visible then
+            SetVisible(not GuiVisible)
+        else
+            PanelRoot.Visible = true
+            SetVisible(true)
+        end
+    end
+
+    -- Focus search: /
+    if inp.KeyCode == Enum.KeyCode.Slash and not GuiVisible then
+        SetVisible(true)
+    end
+
+    if not SearchBox:IsFocused() and not MinInput:IsFocused() then return end
+
+    -- Arrow navigation in dropdown
+    if inp.KeyCode == Enum.KeyCode.Up then
+        if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
+            UpdateDropSelection(selectedDropIdx - 1)
+        else
+            local prev = History:Prev()
+            if prev ~= "" then SearchBox.Text = prev; MinInput.Text = prev end
+        end
+    elseif inp.KeyCode == Enum.KeyCode.Down then
+        if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
+            UpdateDropSelection(selectedDropIdx + 1)
+        else
+            local nxt = History:Next()
+            SearchBox.Text = nxt; MinInput.Text = nxt
+        end
+    elseif inp.KeyCode == Enum.KeyCode.Escape then
+        HideDropdown()
+        SearchBox:ReleaseFocus()
+        MinInput:ReleaseFocus()
+    elseif inp.KeyCode == Enum.KeyCode.Tab then
+        -- autocomplete top result
+        if #dropItems > 0 then
+            SearchBox.Text = ":"..dropItems[selectedDropIdx].aliases[1].." "
+            SearchBox.CursorPosition = #SearchBox.Text + 1
+            HideDropdown()
+        end
+    end
+end)
+
+-- MinBar input
+MinInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local text = MinInput.Text:match("^%s*(.-)%s*$")
+        if text ~= "" then
+            ExecCommand(text:sub(1,1) == ":" and text or ":"..text)
+        end
+        MinInput.Text = ""
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════
+-- CHAT HOOK  ( :command args )
+-- ══════════════════════════════════════════════════════════════
+local function OnChat(msg)
+    if msg:sub(1,1) ~= ":" then return end
+    ExecCommand(msg)
+    -- suppress the chat message visually (best-effort in executor)
+    pcall(function()
+        StarterGui:SetCore("ChatMakeSystemMessage", {
+            Text      = "[Apex] Ran: " .. msg,
+            Color     = T.Violet,
+            Font      = Enum.Font.GothamBold,
+            TextSize  = 14,
+        })
+    end)
+end
+
+local chatConn
+pcall(function()
+    local ChatService = game:GetService("Chat")
+    -- executor hook
+    chatConn = LP.Chatted:Connect(OnChat)
+end)
+ENV.ApexAdmin_ChatConn = chatConn
+
+-- ══════════════════════════════════════════════════════════════
+-- BUILT-IN COMMANDS (core set — expand in Part 2+)
+-- ══════════════════════════════════════════════════════════════
+
+-- :help — list all commands in notification + console
+Registry:Add({
+    aliases     = {"help", "h", "?"},
+    description = "List all commands or get info on one",
+    category    = "Info",
+    args        = {{ name="command", type="string", optional=true, hint="speed" }},
+    usage       = ":help [command]",
+    execute     = function(args, raw, ctx)
+        if args[1] then
+            local def = Registry:Get(args[1])
+            if not def then
+                Notif.Push("No command: :"..args[1], "warn")
+                return
+            end
+            Notif.Push(
+                ":"..def.aliases[1].." — "..def.description.."\nUsage: "..(def.usage or ""),
+                "info", 6
+            )
+        else
+            local all  = Registry:All()
+            local lines = {}
+            table.sort(all, function(a,b) return a._canon < b._canon end)
+            for _, d in ipairs(all) do
+                table.insert(lines, ":"..d.aliases[1].." — "..(d.description or ""))
+            end
+            -- Print to executor console
+            for _, l in ipairs(lines) do print(l) end
+            Notif.Push(#all.." commands available. See executor console for full list.", "info", 4)
+            -- Also open panel and show all
+            SetVisible(true)
+            activeTab = "All"
+            SearchBox.Text = ""
+            BuildCommandList("")
+            BuildTabs()
+        end
+    end,
+})
+
+-- :ping
+Registry:Add({
+    aliases     = {"ping"},
+    description = "Show current client ping",
+    category    = "Info",
+    usage       = ":ping",
+    execute     = function(args, raw, ctx)
+        local ws = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+        local ms = ws and math.floor(ws.Value) or -1
+        Notif.Push("Ping: "..ms.." ms", ms > 150 and "warn" or "success")
+    end,
+})
+
+-- :fps
+Registry:Add({
+    aliases     = {"fps"},
+    description = "Show current client FPS",
+    category    = "Info",
+    usage       = ":fps",
+    execute     = function(args, raw, ctx)
+        local fps = math.floor(1/RunService.RenderStepped:Wait())
+        Notif.Push("FPS: "..fps, fps < 30 and "warn" or "success")
+    end,
+})
+
+-- :speed [n]
+Registry:Add({
+    aliases     = {"speed", "spd", "ws"},
+    description = "Set your WalkSpeed",
+    category    = "Movement",
+    args        = {{ name="value", type="number", optional=false, default=16, hint="50" }},
+    usage       = ":speed 50",
+    execute     = function(args, raw, ctx)
+        local v  = tonumber(args[1]) or 16
+        local ch = LP.Character or LP.CharacterAdded:Wait()
+        local hum = ch:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = v
+            Notif.Push("WalkSpeed set to "..v, "success")
+        else
+            Notif.Push("No Humanoid found.", "error")
+        end
+    end,
+})
+
+-- :jump [n]
+Registry:Add({
+    aliases     = {"jump", "jp", "jh"},
+    description = "Set your JumpPower / JumpHeight",
+    category    = "Movement",
+    args        = {{ name="value", type="number", optional=false, default=50, hint="100" }},
+    usage       = ":jump 100",
+    execute     = function(args, raw, ctx)
+        local v   = tonumber(args[1]) or 50
+        local ch  = LP.Character or LP.CharacterAdded:Wait()
+        local hum = ch:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if hum.UseJumpPower then hum.JumpPower  = v
+            else                     hum.JumpHeight = v end
+            Notif.Push("JumpPower set to "..v, "success")
+        end
+    end,
+})
+
+-- :god
+Registry:Add({
+    aliases     = {"god", "godmode", "gm"},
+    description = "Toggle god mode (max health + no damage)",
+    category    = "Player",
+    usage       = ":god",
+    execute     = function(args, raw, ctx)
+        local ch  = LP.Character or LP.CharacterAdded:Wait()
+        local hum = ch:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.MaxHealth = math.huge
+            hum.Health    = math.huge
+            Notif.Push("God mode enabled.", "success")
+        end
+    end,
+})
+
+-- :noclip
+Registry:Add({
+    aliases     = {"noclip", "nc", "ghost"},
+    description = "Toggle noclip (fly through walls)",
+    category    = "Movement",
+    usage       = ":noclip",
+    execute     = function(args, raw, ctx)
+        local ch = LP.Character
+        if not ch then Notif.Push("No character.", "error"); return end
+        local toggling = not ch:GetAttribute("_noclip")
+        ch:SetAttribute("_noclip", toggling)
+        if toggling then
+            local conn
+            conn = RunService.Stepped:Connect(function()
+                if not ch:GetAttribute("_noclip") then conn:Disconnect(); return end
+                for _, p in ipairs(ch:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = false end
+                end
+            end)
+            Notif.Push("Noclip ON", "success")
+        else
+            for _, p in ipairs(ch:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = true end
+            end
+            Notif.Push("Noclip OFF", "warn")
+        end
+    end,
+})
+
+-- :goto [player]
+Registry:Add({
+    aliases     = {"goto", "tp", "teleport"},
+    description = "Teleport to a player",
+    category    = "Teleport",
+    args        = {{ name="player", type="string", optional=false, hint="username" }},
+    usage       = ":goto PlayerName",
+    execute     = function(args, raw, ctx)
+        local name   = args[1]
+        local target = nil
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower():sub(1,#name) == name:lower() then
+                target = p; break
+            end
+        end
+        if not target then Notif.Push("Player not found: "..name, "error"); return end
+        local myCh  = LP.Character
+        local tgCh  = target.Character
+        if not myCh or not tgCh then Notif.Push("Character missing.", "error"); return end
+        local root  = myCh:FindFirstChild("HumanoidRootPart")
+        local tRoot = tgCh:FindFirstChild("HumanoidRootPart")
+        if root and tRoot then
+            root.CFrame = tRoot.CFrame + Vector3.new(2, 0, 0)
+            Notif.Push("Teleported to "..target.Name, "success")
+        end
+    end,
+})
+
+-- :bring [player]
+Registry:Add({
+    aliases     = {"bring"},
+    description = "Bring a player to you",
+    category    = "Teleport",
+    args        = {{ name="player", type="string", optional=false, hint="username" }},
+    usage       = ":bring PlayerName",
+    execute     = function(args, raw, ctx)
+        local name   = args[1]
+        local target = nil
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower():sub(1,#name) == name:lower() then
+                target = p; break
+            end
+        end
+        if not target then Notif.Push("Player not found: "..name, "error"); return end
+        local myCh = LP.Character
+        local tgCh = target.Character
+        if not myCh or not tgCh then Notif.Push("Character missing.", "error"); return end
+        local myRoot = myCh:FindFirstChild("HumanoidRootPart")
+        local tgRoot = tgCh:FindFirstChild("HumanoidRootPart")
+        if myRoot and tgRoot then
+            tgRoot.CFrame = myRoot.CFrame + Vector3.new(2, 0, 0)
+            Notif.Push("Brought "..target.Name, "success")
+        end
+    end,
+})
+
+-- :invisible / :vis
+Registry:Add({
+    aliases     = {"invisible", "invis", "vis"},
+    description = "Toggle character invisibility",
+    category    = "Visual",
+    usage       = ":invisible",
+    execute     = function(args, raw, ctx)
+        local ch = LP.Character
+        if not ch then Notif.Push("No character.", "error"); return end
+        local isInvis = ch:GetAttribute("_invis")
+        ch:SetAttribute("_invis", not isInvis)
+        for _, p in ipairs(ch:GetDescendants()) do
+            if p:IsA("BasePart") or p:IsA("Decal") then
+                p.LocalTransparencyModifier = isInvis and 0 or 1
+            end
+        end
+        Notif.Push(isInvis and "Visible" or "Invisible", "info")
+    end,
+})
+
+-- :time [h]
+Registry:Add({
+    aliases     = {"time", "lighting"},
+    description = "Set game lighting time (0-24)",
+    category    = "World",
+    args        = {{ name="hour", type="number", optional=false, hint="14" }},
+    usage       = ":time 14",
+    execute     = function(args, raw, ctx)
+        local h = tonumber(args[1])
+        if not h then Notif.Push("Provide hour 0-24", "warn"); return end
+        game:GetService("Lighting").TimeOfDay = string.format("%02d:00:00", math.clamp(h,0,24))
+        Notif.Push("Time set to "..h..":00", "success")
+    end,
+})
+
+-- :fog [n]
+Registry:Add({
+    aliases     = {"fog", "fogend"},
+    description = "Set fog end distance",
+    category    = "World",
+    args        = {{ name="dist", type="number", optional=false, hint="1000" }},
+    usage       = ":fog 500",
+    execute     = function(args, raw, ctx)
+        local d = tonumber(args[1]) or 1000
+        game:GetService("Lighting").FogEnd = d
+        Notif.Push("Fog end: "..d, "success")
+    end,
+})
+
+-- :players
+Registry:Add({
+    aliases     = {"players", "plist", "who"},
+    description = "List all players in the server",
+    category    = "Info",
+    usage       = ":players",
+    execute     = function(args, raw, ctx)
+        local all = Players:GetPlayers()
+        local msg = "Players ("..#all.."):\n"
+        for _, p in ipairs(all) do msg = msg .. "  "..p.Name.."\n" end
+        print(msg)
+        Notif.Push(#all.." players in server. See console.", "info")
+    end,
+})
+
+-- :reset
+Registry:Add({
+    aliases     = {"reset", "respawn"},
+    description = "Reset your character",
+    category    = "Player",
+    usage       = ":reset",
+    execute     = function(args, raw, ctx)
+        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = 0 end
+        Notif.Push("Character reset.", "info")
+    end,
+})
+
+-- :history
+Registry:Add({
+    aliases     = {"history", "hist"},
+    description = "Show command history",
+    category    = "Info",
+    usage       = ":history",
+    execute     = function(args, raw, ctx)
+        local log = History:GetAll()
+        if #log == 0 then Notif.Push("No history yet.", "info"); return end
+        for _, entry in ipairs(log) do print(entry) end
+        Notif.Push(#log.." entries in history. See console.", "info")
+    end,
+})
+
+-- :clear
+Registry:Add({
+    aliases     = {"clear", "cls"},
+    description = "Clear the search box",
+    category    = "Utility",
+    usage       = ":clear",
+    execute     = function(args, raw, ctx)
+        SearchBox.Text = ""
+        BuildCommandList("")
+    end,
+})
+
+-- ══════════════════════════════════════════════════════════════
+-- HELP BUTTON WIRING
+-- ══════════════════════════════════════════════════════════════
+HelpBtn.MouseButton1Click:Connect(function()
+    Registry:Get("help").execute({}, ":help", {player=LP, notif=Notif, registry=Registry})
+end)
+
+-- ══════════════════════════════════════════════════════════════
+-- INITIAL RENDER
+-- ══════════════════════════════════════════════════════════════
+BuildTabs()
+BuildCommandList("")
+
+StatusLabel.Text    = "Apex Admin  ·  Ready  ·  F2 to toggle"
+CmdCountLabel.Text  = #Registry:All() .. " commands loaded"
+
+-- Store global ref for part 2 to extend
+ENV.ApexAdmin     = ScreenGui
+ENV.ApexRegistry  = Registry
+ENV.ApexNotif     = Notif
+ENV.ApexTheme     = T
+ENV.ApexHistory   = History
+ENV.ApexExec      = ExecCommand
+ENV.ApexBuildList = BuildCommandList
+ENV.ApexBuildTabs = BuildTabs
+
+print("[ApexAdmin v1.0] Loaded. F2 to toggle. Chat with :command to run.")
+print("[ApexAdmin] Add commands via: ENV.ApexRegistry:Add({...})")
