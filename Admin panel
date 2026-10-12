@@ -1,106 +1,110 @@
 --[[
 ╔══════════════════════════════════════════════════════════════╗
-║           APEX ADMIN  ·  v1.0  ·  Foundation Layer          ║
-║  Architecture : Modular · Registry-driven · Category-indexed ║
-║  Target       : Executor-compatible Luau                     ║
-║  Chat trigger : :commandname arg1 arg2                       ║
+║        APEX ADMIN  ·  v2.0  ·  FULL COMMAND EXPANSION       ║
+║  400+ commands · Glass UI · Chat trigger : :cmd args         ║
 ╚══════════════════════════════════════════════════════════════╝
 ]]
 
 -- ══════════════════════════════════════════════════════════════
 -- SERVICES
 -- ══════════════════════════════════════════════════════════════
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
-local TweenService      = game:GetService("TweenService")
-local Players           = game:GetService("Players")
-local TextService       = game:GetService("TextService")
-local StarterGui        = game:GetService("StarterGui")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Players          = game:GetService("Players")
+local StarterGui       = game:GetService("StarterGui")
+local Lighting         = game:GetService("Lighting")
+local SoundService     = game:GetService("SoundService")
+local Workspace        = game:GetService("Workspace")
+local Stats            = game:GetService("Stats")
 
-local LP     = Players.LocalPlayer
-local PGui   = LP:WaitForChild("PlayerGui")
-local Cam    = workspace.CurrentCamera
+local LP   = Players.LocalPlayer
+local PGui = LP:WaitForChild("PlayerGui")
+local Cam  = Workspace.CurrentCamera
 
 -- ══════════════════════════════════════════════════════════════
 -- HOT-RELOAD GUARD
 -- ══════════════════════════════════════════════════════════════
 if not getgenv then getgenv = function() return _G end end
 local ENV = getgenv()
-if ENV.ApexAdmin then
-    pcall(function() ENV.ApexAdmin:Destroy() end)
-    pcall(function() ENV.ApexAdmin_ChatConn:Disconnect() end)
-end
+if ENV.ApexAdmin    then pcall(function() ENV.ApexAdmin:Destroy()           end) end
+if ENV.ApexChatConn then pcall(function() ENV.ApexChatConn:Disconnect()     end) end
+if ENV.ApexLoops    then for _, c in pairs(ENV.ApexLoops) do pcall(function() c:Disconnect() end) end end
+ENV.ApexLoops = {}
 
 -- ══════════════════════════════════════════════════════════════
--- THEME
+-- THEME  (glass / transparent aesthetic)
 -- ══════════════════════════════════════════════════════════════
 local T = {
-    -- Backgrounds
-    BG          = Color3.fromRGB(6,   6,   10),
-    BGAlt       = Color3.fromRGB(10,  10,  16),
-    Surface     = Color3.fromRGB(14,  14,  22),
-    SurfaceHov  = Color3.fromRGB(20,  20,  32),
-    SurfaceSel  = Color3.fromRGB(28,  20,  50),
+    -- Glass bases
+    Glass       = Color3.fromRGB(8,   8,   14),
+    GlassMid    = Color3.fromRGB(12,  12,  20),
+    GlassSurf   = Color3.fromRGB(18,  16,  28),
+    GlassHov    = Color3.fromRGB(26,  22,  42),
+    GlassSel    = Color3.fromRGB(34,  24,  60),
 
-    -- Neon accents
-    Violet      = Color3.fromRGB(130, 80,  255),
-    VioletBright= Color3.fromRGB(165, 110, 255),
-    Cyan        = Color3.fromRGB(0,   210, 255),
+    -- Neon palette
+    Violet      = Color3.fromRGB(138, 80,  255),
+    VioletBr    = Color3.fromRGB(172, 120, 255),
+    Cyan        = Color3.fromRGB(0,   220, 255),
     CyanDim     = Color3.fromRGB(0,   160, 200),
-    Green       = Color3.fromRGB(0,   230, 140),
-    Yellow      = Color3.fromRGB(255, 195, 0),
-    Red         = Color3.fromRGB(255, 55,  80),
-    Pink        = Color3.fromRGB(255, 80,  160),
-    Orange      = Color3.fromRGB(255, 145, 0),
+    Green       = Color3.fromRGB(0,   240, 148),
+    GreenDim    = Color3.fromRGB(0,   180, 110),
+    Yellow      = Color3.fromRGB(255, 200, 0),
+    Red         = Color3.fromRGB(255, 50,  80),
+    Pink        = Color3.fromRGB(255, 80,  180),
+    Orange      = Color3.fromRGB(255, 148, 0),
+    Teal        = Color3.fromRGB(0,   200, 180),
+    Lime        = Color3.fromRGB(160, 255, 80),
+    Sky         = Color3.fromRGB(80,  180, 255),
 
     -- Text
-    TxtPri      = Color3.fromRGB(240, 240, 255),
-    TxtSec      = Color3.fromRGB(155, 150, 180),
-    TxtDim      = Color3.fromRGB(80,  78,  100),
+    TxtPri      = Color3.fromRGB(240, 238, 255),
+    TxtSec      = Color3.fromRGB(150, 144, 178),
+    TxtDim      = Color3.fromRGB(75,  72,  98),
     TxtInput    = Color3.fromRGB(255, 255, 255),
-    TxtMatch    = Color3.fromRGB(165, 110, 255),
 
-    -- Borders (pure black outlines always)
+    -- Borders
     Border      = Color3.fromRGB(0,   0,   0),
-    BorderGlow  = Color3.fromRGB(80,  50,  180),
+    BorderGlow  = Color3.fromRGB(90,  55,  200),
 
-    -- Transparency values
-    BGTrans     = 0.10,
-    SurfTrans   = 0.06,
-    GlowTrans   = 0.72,
-    MinBarTrans = 0.08,
+    -- Transparency
+    PanelTr     = 0.22,   -- main panel glass
+    SurfTr      = 0.14,   -- surface elements
+    RowTr       = 0.10,   -- command rows
+    MinBarTr    = 0.18,
+    GlowTr      = 0.78,
 
     -- Font
     FontBold    = Enum.Font.GothamBold,
     FontMed     = Enum.Font.Gotham,
     FontLight   = Enum.Font.Gotham,
     FontMono    = Enum.Font.RobotoMono,
-    SzTitle     = 14,
-    SzBody      = 13,
-    SzSmall     = 11,
-    SzInput     = 14,
-    SzTag       = 10,
+    SzTitle     = 13,
+    SzBody      = 12,
+    SzSmall     = 10,
+    SzInput     = 13,
+    SzTag       = 9,
 
-    -- Dimensions
-    BarH        = 46,
-    MinBarH     = 36,
-    MinBarW     = 320,
-    DropMaxH    = 300,
+    -- Dims
+    BarH        = 44,
+    MinBarH     = 34,
+    MinBarW     = 310,
+    DropMaxH    = 280,
+    PanelW      = 600,
+    PanelH      = 500,
     ResizeGrip  = 10,
-    PanelW      = 580,
-    PanelH      = 480,
 
-    -- Animation infos
+    -- Tweens
     Fast   = TweenInfo.new(0.10, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-    Med    = TweenInfo.new(0.20, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-    Slow   = TweenInfo.new(0.36, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-    Bounce = TweenInfo.new(0.30, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
-    Spring = TweenInfo.new(0.40, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+    Med    = TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Slow   = TweenInfo.new(0.32, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Bounce = TweenInfo.new(0.28, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
 
     -- Radius
     R     = UDim.new(0, 6),
     RLg   = UDim.new(0, 10),
-    RPill = UDim.new(0, 18),
+    RPill = UDim.new(0, 16),
 }
 
 -- ══════════════════════════════════════════════════════════════
@@ -121,10 +125,10 @@ end
 
 function U.Stroke(p, col, thick, tr)
     local s = Instance.new("UIStroke")
-    s.Color            = col   or T.Border
-    s.Thickness        = thick or 2
-    s.Transparency     = tr    or 0
-    s.ApplyStrokeMode  = Enum.ApplyStrokeMode.Border
+    s.Color           = col   or T.Border
+    s.Thickness       = thick or 1.5
+    s.Transparency    = tr    or 0
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     s.Parent = p; return s
 end
 
@@ -149,13 +153,13 @@ end
 
 function U.Frame(props)
     local f = Instance.new("Frame")
-    f.BackgroundColor3       = props.bg    or T.Surface
-    f.BackgroundTransparency = props.tr    or 0
+    f.BackgroundColor3       = props.bg   or T.GlassSurf
+    f.BackgroundTransparency = props.tr   or 0
     f.BorderSizePixel        = 0
-    f.Size                   = props.size  or UDim2.new(1, 0, 0, 30)
-    f.Position               = props.pos   or UDim2.new(0, 0, 0, 0)
-    f.ClipsDescendants       = props.clip  or false
-    f.ZIndex                 = props.z     or 1
+    f.Size                   = props.size or UDim2.new(1,0,0,30)
+    f.Position               = props.pos  or UDim2.new(0,0,0,0)
+    f.ClipsDescendants       = props.clip or false
+    f.ZIndex                 = props.z    or 1
     if props.name   then f.Name   = props.name   end
     if props.parent then f.Parent = props.parent end
     return f
@@ -164,36 +168,36 @@ end
 function U.Label(props)
     local l = Instance.new("TextLabel")
     l.BackgroundTransparency = 1
-    l.Text           = props.text   or ""
-    l.TextColor3     = props.col    or T.TxtPri
-    l.Font           = props.font   or T.FontLight
-    l.TextSize       = props.sz     or T.SzBody
-    l.TextXAlignment = props.xa     or Enum.TextXAlignment.Left
-    l.TextYAlignment = props.ya     or Enum.TextYAlignment.Center
+    l.Text           = props.text or ""
+    l.TextColor3     = props.col  or T.TxtPri
+    l.Font           = props.font or T.FontLight
+    l.TextSize       = props.sz   or T.SzBody
+    l.TextXAlignment = props.xa   or Enum.TextXAlignment.Left
+    l.TextYAlignment = props.ya   or Enum.TextYAlignment.Center
     l.TextTruncate   = Enum.TextTruncate.AtEnd
-    l.RichText       = props.rich   or false
-    l.Size           = props.size   or UDim2.new(1, 0, 1, 0)
-    l.Position       = props.pos    or UDim2.new(0, 0, 0, 0)
-    l.ZIndex         = props.z      or 2
-    l.Name           = props.name   or "Label"
+    l.RichText       = props.rich or false
+    l.Size           = props.size or UDim2.new(1,0,1,0)
+    l.Position       = props.pos  or UDim2.new(0,0,0,0)
+    l.ZIndex         = props.z    or 2
+    l.Name           = props.name or "Label"
     if props.parent then l.Parent = props.parent end
     return l
 end
 
 function U.Button(props)
     local b = Instance.new("TextButton")
-    b.BackgroundColor3       = props.bg    or T.SurfaceHov
-    b.BackgroundTransparency = props.tr    or 0
+    b.BackgroundColor3       = props.bg   or T.GlassHov
+    b.BackgroundTransparency = props.tr   or 0
     b.BorderSizePixel        = 0
-    b.Text                   = props.text  or ""
-    b.TextColor3             = props.col   or T.TxtPri
-    b.Font                   = props.font  or T.FontBold
-    b.TextSize               = props.sz    or T.SzBody
-    b.Size                   = props.size  or UDim2.new(1, 0, 0, 32)
-    b.Position               = props.pos   or UDim2.new(0, 0, 0, 0)
+    b.Text                   = props.text or ""
+    b.TextColor3             = props.col  or T.TxtPri
+    b.Font                   = props.font or T.FontBold
+    b.TextSize               = props.sz   or T.SzBody
+    b.Size                   = props.size or UDim2.new(1,0,0,30)
+    b.Position               = props.pos  or UDim2.new(0,0,0,0)
     b.AutoButtonColor        = false
-    b.ZIndex                 = props.z     or 2
-    b.Name                   = props.name  or "Btn"
+    b.ZIndex                 = props.z    or 2
+    b.Name                   = props.name or "Btn"
     if props.parent then b.Parent = props.parent end
     return b
 end
@@ -201,28 +205,28 @@ end
 function U.Hover(btn, n, h, nt, ht)
     nt = nt or 0; ht = ht or 0
     btn.MouseEnter:Connect(function()
-        U.Tween(btn, T.Fast, {BackgroundColor3 = h, BackgroundTransparency = ht})
+        U.Tween(btn, T.Fast, {BackgroundColor3=h, BackgroundTransparency=ht})
     end)
     btn.MouseLeave:Connect(function()
-        U.Tween(btn, T.Fast, {BackgroundColor3 = n, BackgroundTransparency = nt})
+        U.Tween(btn, T.Fast, {BackgroundColor3=n, BackgroundTransparency=nt})
     end)
 end
 
 function U.Ripple(btn)
     btn.MouseButton1Click:Connect(function()
-        local rip = Instance.new("Frame")
-        rip.BackgroundColor3       = Color3.new(1,1,1)
-        rip.BackgroundTransparency = 0.82
-        rip.BorderSizePixel        = 0
-        rip.Size                   = UDim2.new(0, 0, 0, 0)
-        rip.Position               = UDim2.new(0.5, 0, 0.5, 0)
-        rip.AnchorPoint            = Vector2.new(0.5, 0.5)
-        rip.ZIndex                 = btn.ZIndex + 1
-        rip.Parent                 = btn
-        U.Corner(rip, UDim.new(1, 0))
-        U.Tween(rip, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-            {Size = UDim2.new(2.5, 0, 2.5, 0), BackgroundTransparency = 1})
-        task.delay(0.5, function() rip:Destroy() end)
+        local r = Instance.new("Frame")
+        r.BackgroundColor3       = Color3.new(1,1,1)
+        r.BackgroundTransparency = 0.84
+        r.BorderSizePixel        = 0
+        r.Size                   = UDim2.new(0,0,0,0)
+        r.Position               = UDim2.new(0.5,0,0.5,0)
+        r.AnchorPoint            = Vector2.new(0.5,0.5)
+        r.ZIndex                 = btn.ZIndex + 1
+        r.Parent                 = btn
+        U.Corner(r, UDim.new(1,0))
+        U.Tween(r, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Size=UDim2.new(2.5,0,2.5,0), BackgroundTransparency=1})
+        task.delay(0.5, function() r:Destroy() end)
     end)
 end
 
@@ -230,7 +234,7 @@ function U.FuzzyMatch(hay, needle)
     if needle == "" then return true, 100 end
     hay = hay:lower(); needle = needle:lower()
     if hay == needle then return true, 200 end
-    if hay:sub(1, #needle) == needle then return true, 150 end
+    if hay:sub(1,#needle) == needle then return true, 150 end
     if hay:find(needle, 1, true) then return true, 100 end
     local hi = 1
     for i = 1, #needle do
@@ -243,136 +247,119 @@ end
 
 function U.HighlightMatch(text, query)
     if query == "" then return text end
-    local lo = text:lower()
-    local ql = query:lower()
+    local lo = text:lower(); local ql = query:lower()
     local s, e = lo:find(ql, 1, true)
     if s then
-        return text:sub(1, s-1)
-            .. '<font color="rgb(165,110,255)"><b>'
-            .. text:sub(s, e)
-            .. "</b></font>"
-            .. text:sub(e+1)
+        return text:sub(1,s-1)..'<font color="rgb(172,120,255)"><b>'..text:sub(s,e).."</b></font>"..text:sub(e+1)
     end
     return text
 end
 
 function U.ParseArgs(raw)
-    local args = {}
-    for token in raw:gmatch("%S+") do
-        table.insert(args, token)
+    local a = {}
+    for t in raw:gmatch("%S+") do table.insert(a,t) end
+    return a
+end
+
+function U.FindPlayer(name)
+    if not name then return nil end
+    local nl = name:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower():sub(1,#nl) == nl then return p end
     end
-    return args
+    return nil
+end
+
+function U.GetChar(p)
+    return (p or LP).Character
+end
+
+function U.GetHum(p)
+    local c = U.GetChar(p)
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+function U.GetRoot(p)
+    local c = U.GetChar(p)
+    return c and c:FindFirstChild("HumanoidRootPart")
 end
 
 -- ══════════════════════════════════════════════════════════════
 -- COMMAND REGISTRY
 -- ══════════════════════════════════════════════════════════════
-local Registry = {
-    _cmds  = {},   -- canonical_name -> def
-    _alias = {},   -- alias -> canonical_name
-    _cats  = {},   -- category -> { name, ... }
-}
+local Registry = { _cmds={}, _alias={}, _cats={} }
 
 Registry.CategoryDefs = {
     Player    = { label="Player",    icon="👤", col=Color3.fromRGB(80, 180,255), order=1  },
     Movement  = { label="Movement",  icon="🏃", col=Color3.fromRGB(0,  220,140), order=2  },
-    Visual    = { label="Visual",    icon="👁️", col=Color3.fromRGB(200,100,255), order=3  },
+    Visual    = { label="Visual",    icon="👁",  col=Color3.fromRGB(200,100,255), order=3  },
     World     = { label="World",     icon="🌍", col=Color3.fromRGB(255,180,0),   order=4  },
-    Combat    = { label="Combat",    icon="⚔️", col=Color3.fromRGB(255,55, 80),  order=5  },
-    Utility   = { label="Utility",   icon="⚙️", col=Color3.fromRGB(160,155,185), order=6  },
-    Admin     = { label="Admin",     icon="🛡️", col=Color3.fromRGB(255,145,0),   order=7  },
+    Combat    = { label="Combat",    icon="⚔",  col=Color3.fromRGB(255,55, 80),  order=5  },
+    Utility   = { label="Utility",   icon="⚙",  col=Color3.fromRGB(160,155,185), order=6  },
+    Admin     = { label="Admin",     icon="🛡",  col=Color3.fromRGB(255,145,0),   order=7  },
     Fun       = { label="Fun",       icon="🎉", col=Color3.fromRGB(255,210,60),  order=8  },
     Debug     = { label="Debug",     icon="🐛", col=Color3.fromRGB(180,255,120), order=9  },
-    Teleport  = { label="Teleport",  icon="✨", col=Color3.fromRGB(130,80, 255), order=10 },
+    Teleport  = { label="Teleport",  icon="✨", col=Color3.fromRGB(138,80, 255), order=10 },
     Character = { label="Character", icon="🎭", col=Color3.fromRGB(255,80, 160), order=11 },
     Network   = { label="Network",   icon="📡", col=Color3.fromRGB(0,  200,255), order=12 },
-    Info      = { label="Info",      icon="ℹ️", col=Color3.fromRGB(120,200,255), order=13 },
+    Info      = { label="Info",      icon="ℹ",  col=Color3.fromRGB(120,200,255), order=13 },
+    Camera    = { label="Camera",    icon="🎥", col=Color3.fromRGB(255,180,80),  order=14 },
+    Effects   = { label="Effects",   icon="✦",  col=Color3.fromRGB(255,80, 255), order=15 },
+    Build     = { label="Build",     icon="🔧", col=Color3.fromRGB(140,220,100), order=16 },
 }
 
---[[
-    Register a command. Schema:
-    {
-        name        = "speed",               -- canonical name (no colon)
-        aliases     = {"speed","spd","ws"},  -- first is canonical
-        description = "Set walkspeed",
-        category    = "Movement",
-        args        = {
-            { name="value", type="number", optional=false, default=nil, hint="16" }
-        },
-        execute     = function(args, rawInput, ctx) ... end,
-        dangerous   = false,   -- adds confirmation step
-        hidden      = false,   -- hides from search
-        usage       = ":speed 50",
-    }
-]]
 function Registry:Add(def)
-    assert(def.aliases and #def.aliases > 0, "Command needs at least one alias")
-    assert(def.execute,   "Command needs execute function")
-    assert(def.category,  "Command needs a category")
-    def.name = def.name or def.aliases[1]
-    local canon = def.aliases[1]:lower()
-    def._canon = canon
-    self._cmds[canon] = def
-    for _, alias in ipairs(def.aliases) do
-        self._alias[alias:lower()] = canon
-    end
-    if not self._cats[def.category] then
-        self._cats[def.category] = {}
-    end
-    table.insert(self._cats[def.category], canon)
+    assert(def.aliases and #def.aliases > 0, "Need alias")
+    assert(def.execute,  "Need execute")
+    assert(def.category, "Need category")
+    def.name  = def.name or def.aliases[1]
+    def._canon = def.aliases[1]:lower()
+    self._cmds[def._canon] = def
+    for _, a in ipairs(def.aliases) do self._alias[a:lower()] = def._canon end
+    if not self._cats[def.category] then self._cats[def.category] = {} end
+    table.insert(self._cats[def.category], def._canon)
 end
 
 function Registry:Get(alias)
-    local canon = self._alias[alias:lower()]
-    return canon and self._cmds[canon]
+    local c = self._alias[alias:lower()]
+    return c and self._cmds[c]
 end
 
 function Registry:Search(query, limit)
     limit = limit or 20
     local results = {}
     if query == "" then
-        for canon, def in pairs(self._cmds) do
-            if not def.hidden then
-                table.insert(results, { def=def, score=50 })
-            end
+        for _, def in pairs(self._cmds) do
+            if not def.hidden then table.insert(results, {def=def, score=50}) end
         end
         table.sort(results, function(a,b)
             local ao = (Registry.CategoryDefs[a.def.category] or {}).order or 99
             local bo = (Registry.CategoryDefs[b.def.category] or {}).order or 99
-            if ao ~= bo then return ao < bo end
-            return a.def._canon < b.def._canon
+            return ao ~= bo and ao < bo or a.def._canon < b.def._canon
         end)
     else
-        for canon, def in pairs(self._cmds) do
+        for _, def in pairs(self._cmds) do
             if not def.hidden then
-                local bestScore = 0
+                local best = 0
                 for _, alias in ipairs(def.aliases) do
-                    local match, score = U.FuzzyMatch(alias, query)
-                    if match and score > bestScore then bestScore = score end
+                    local m, s = U.FuzzyMatch(alias, query)
+                    if m and s > best then best = s end
                 end
-                local descMatch, descScore = U.FuzzyMatch(def.description or "", query)
-                if descMatch and descScore * 0.4 > bestScore then
-                    bestScore = math.floor(descScore * 0.4)
-                end
-                if bestScore > 0 then
-                    table.insert(results, { def=def, score=bestScore })
-                end
+                local dm, ds = U.FuzzyMatch(def.description or "", query)
+                if dm and math.floor(ds*0.4) > best then best = math.floor(ds*0.4) end
+                if best > 0 then table.insert(results, {def=def, score=best}) end
             end
         end
         table.sort(results, function(a,b) return a.score > b.score end)
     end
     local out = {}
-    for i = 1, math.min(#results, limit) do
-        table.insert(out, results[i].def)
-    end
+    for i = 1, math.min(#results, limit) do table.insert(out, results[i].def) end
     return out
 end
 
 function Registry:All()
     local out = {}
-    for _, def in pairs(self._cmds) do
-        if not def.hidden then table.insert(out, def) end
-    end
+    for _, d in pairs(self._cmds) do if not d.hidden then table.insert(out, d) end end
     return out
 end
 
@@ -382,101 +369,69 @@ end
 local Notif = {}
 local notifHolder
 
-function Notif.Init(screenGui)
+function Notif.Init(gui)
     notifHolder = Instance.new("Frame")
     notifHolder.BackgroundTransparency = 1
-    notifHolder.Size     = UDim2.new(0, 320, 1, 0)
-    notifHolder.Position = UDim2.new(1, -330, 0, 0)
+    notifHolder.Size     = UDim2.new(0,310,1,0)
+    notifHolder.Position = UDim2.new(1,-320,0,0)
     notifHolder.ZIndex   = 50
     notifHolder.Name     = "NotifHolder"
-    notifHolder.Parent   = screenGui
-    U.List(notifHolder, Enum.FillDirection.Vertical, 8, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top)
-    U.Pad(notifHolder, 12, 0, 0, 0)
+    notifHolder.Parent   = gui
+    U.List(notifHolder, Enum.FillDirection.Vertical, 6,
+        Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top)
+    U.Pad(notifHolder, 10, 0, 0, 0)
 end
 
-function Notif.Push(msg, kind, duration)
-    duration = duration or 3.5
+function Notif.Push(msg, kind, dur)
+    dur  = dur  or 3.5
     kind = kind or "info"
-
-    local accentCol = ({
-        info    = T.Cyan,
-        success = T.Green,
-        warn    = T.Yellow,
-        error   = T.Red,
-    })[kind] or T.Cyan
-
-    local icon = ({
-        info    = "ℹ",
-        success = "✓",
-        warn    = "⚠",
-        error   = "✕",
-    })[kind] or "ℹ"
+    local ac = ({info=T.Cyan, success=T.Green, warn=T.Yellow, error=T.Red})[kind] or T.Cyan
+    local ic = ({info="ℹ",   success="✓",     warn="⚠",      error="✕"})[kind]   or "ℹ"
 
     local card = Instance.new("Frame")
-    card.BackgroundColor3       = T.Surface
-    card.BackgroundTransparency = T.BGTrans
+    card.BackgroundColor3       = T.GlassMid
+    card.BackgroundTransparency = T.PanelTr
     card.BorderSizePixel        = 0
-    card.Size                   = UDim2.new(1, 0, 0, 52)
+    card.Size                   = UDim2.new(1,0,0,50)
     card.ClipsDescendants        = true
     card.ZIndex                 = 50
     card.Name                   = "Notif"
-
     U.Corner(card, T.R)
-    U.Stroke(card, T.Border, 2)
+    U.Stroke(card, T.Border, 1.5)
 
-    -- Left accent bar
     local bar = Instance.new("Frame")
-    bar.BackgroundColor3 = accentCol
+    bar.BackgroundColor3 = ac
     bar.BorderSizePixel  = 0
-    bar.Size             = UDim2.new(0, 3, 1, 0)
-    bar.Position         = UDim2.new(0, 0, 0, 0)
+    bar.Size             = UDim2.new(0,3,1,0)
     bar.ZIndex           = 51
-    bar.Parent           = card
     U.Corner(bar, UDim.new(0,3))
+    bar.Parent = card
 
-    -- Icon
-    local iconLbl = U.Label({
-        text   = icon,
-        col    = accentCol,
-        font   = T.FontBold,
-        sz     = 16,
-        size   = UDim2.new(0, 28, 1, 0),
-        pos    = UDim2.new(0, 12, 0, 0),
-        z      = 51,
-        parent = card,
-    })
+    U.Label({text=ic, col=ac, font=T.FontBold, sz=15,
+        size=UDim2.new(0,28,1,0), pos=UDim2.new(0,10,0,0),
+        xa=Enum.TextXAlignment.Center, z=51, parent=card})
 
-    -- Message
-    local msgLbl = U.Label({
-        text   = msg,
-        col    = T.TxtPri,
-        font   = T.FontMed,
-        sz     = T.SzBody,
-        size   = UDim2.new(1, -50, 1, 0),
-        pos    = UDim2.new(0, 42, 0, 0),
-        z      = 51,
-        parent = card,
-    })
-    msgLbl.TextWrapped = true
+    local ml = U.Label({text=msg, col=T.TxtPri, font=T.FontMed, sz=T.SzBody,
+        size=UDim2.new(1,-42,1,0), pos=UDim2.new(0,40,0,0), z=51, parent=card})
+    ml.TextWrapped = true
 
-    -- Progress bar
     local prog = Instance.new("Frame")
-    prog.BackgroundColor3 = accentCol
+    prog.BackgroundColor3 = ac
     prog.BorderSizePixel  = 0
-    prog.Size             = UDim2.new(1, 0, 0, 2)
-    prog.Position         = UDim2.new(0, 0, 1, -2)
+    prog.Size             = UDim2.new(1,0,0,2)
+    prog.Position         = UDim2.new(0,0,1,-2)
     prog.ZIndex           = 52
     prog.Parent           = card
 
-    card.Parent = notifHolder
-    card.Position = UDim2.new(1, 20, 0, 0)
+    card.Parent   = notifHolder
+    card.Position = UDim2.new(1,20,0,0)
     card.BackgroundTransparency = 1
 
-    U.Tween(card, T.Med, {Position = UDim2.new(0,0,0,0), BackgroundTransparency = T.BGTrans})
-    U.Tween(prog, TweenInfo.new(duration, Enum.EasingStyle.Linear), {Size = UDim2.new(0,0,0,2)})
+    U.Tween(card, T.Med, {Position=UDim2.new(0,0,0,0), BackgroundTransparency=T.PanelTr})
+    U.Tween(prog, TweenInfo.new(dur, Enum.EasingStyle.Linear), {Size=UDim2.new(0,0,0,2)})
 
-    task.delay(duration, function()
-        U.Tween(card, T.Med, {Position = UDim2.new(1, 20, 0, 0), BackgroundTransparency = 1})
+    task.delay(dur, function()
+        U.Tween(card, T.Med, {Position=UDim2.new(1,20,0,0), BackgroundTransparency=1})
         task.delay(0.25, function() card:Destroy() end)
     end)
 end
@@ -484,214 +439,168 @@ end
 -- ══════════════════════════════════════════════════════════════
 -- HISTORY
 -- ══════════════════════════════════════════════════════════════
-local History = {
-    _log    = {},
-    _cursor = 0,
-    MaxSize = 200,
-}
+local History = { _log={}, _cursor=0, MaxSize=200 }
 
 function History:Push(input)
     if input == "" then return end
     if self._log[#self._log] == input then return end
     table.insert(self._log, input)
-    if #self._log > self.MaxSize then
-        table.remove(self._log, 1)
-    end
+    if #self._log > self.MaxSize then table.remove(self._log, 1) end
     self._cursor = #self._log + 1
 end
 
 function History:Prev()
-    self._cursor = math.max(1, self._cursor - 1)
+    self._cursor = math.max(1, self._cursor-1)
     return self._log[self._cursor] or ""
 end
 
 function History:Next()
-    self._cursor = math.min(#self._log + 1, self._cursor + 1)
+    self._cursor = math.min(#self._log+1, self._cursor+1)
     return self._log[self._cursor] or ""
 end
 
-function History:ResetCursor()
-    self._cursor = #self._log + 1
-end
-
-function History:GetAll()
-    return self._log
-end
+function History:ResetCursor() self._cursor = #self._log+1 end
+function History:GetAll()      return self._log            end
 
 -- ══════════════════════════════════════════════════════════════
--- GUI CONSTRUCTION
+-- GUI CONSTRUCTION  (full glass panel)
 -- ══════════════════════════════════════════════════════════════
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name                  = "ApexAdminGui"
-ScreenGui.ResetOnSpawn          = false
-ScreenGui.ZIndexBehavior        = Enum.ZIndexBehavior.Sibling
-ScreenGui.IgnoreGuiInset        = true
-ScreenGui.DisplayOrder          = 100
-ScreenGui.Parent                = PGui
+ScreenGui.Name             = "ApexAdminGui"
+ScreenGui.ResetOnSpawn     = false
+ScreenGui.ZIndexBehavior   = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset   = true
+ScreenGui.DisplayOrder     = 100
+ScreenGui.Parent           = PGui
 
 Notif.Init(ScreenGui)
 
--- ── Main panel container ──────────────────────────────────────
+-- Shadow layers
 local PanelRoot = Instance.new("Frame")
-PanelRoot.Name                  = "PanelRoot"
+PanelRoot.Name                   = "PanelRoot"
 PanelRoot.BackgroundTransparency = 1
-PanelRoot.Size                  = UDim2.new(0, T.PanelW, 0, T.PanelH)
-PanelRoot.Position              = UDim2.new(0.5, -math.floor(T.PanelW/2), 0.08, 0)
-PanelRoot.ZIndex                = 10
-PanelRoot.Parent                = ScreenGui
+PanelRoot.Size                   = UDim2.new(0, T.PanelW, 0, T.PanelH)
+PanelRoot.Position               = UDim2.new(0.5, -math.floor(T.PanelW/2), 0.06, 0)
+PanelRoot.ZIndex                 = 10
+PanelRoot.Parent                 = ScreenGui
 
--- Drop shadow (layered frames)
-for i = 1, 4 do
+for i = 1, 3 do
     local sh = Instance.new("Frame")
     sh.BackgroundColor3       = Color3.new(0,0,0)
-    sh.BackgroundTransparency = 0.65 + i * 0.07
+    sh.BackgroundTransparency = 0.60 + i*0.10
     sh.BorderSizePixel        = 0
-    sh.Size                   = UDim2.new(1, i*6, 1, i*6)
-    sh.Position               = UDim2.new(0, -i*3, 0, i*2)
+    sh.Size                   = UDim2.new(1, i*8, 1, i*8)
+    sh.Position               = UDim2.new(0, -i*4, 0, i*3)
     sh.ZIndex                 = 9
-    sh.Name                   = "Shadow"
     U.Corner(sh, T.RLg)
     sh.Parent = PanelRoot
 end
 
--- Main background
+-- Glass panel
 local Panel = U.Frame({
-    name   = "Panel",
-    bg     = T.BG,
-    tr     = T.BGTrans,
-    size   = UDim2.new(1, 0, 1, 0),
-    clip   = true,
-    z      = 10,
-    parent = PanelRoot,
+    name="Panel", bg=T.Glass, tr=T.PanelTr,
+    size=UDim2.new(1,0,1,0), clip=true, z=10, parent=PanelRoot,
 })
 U.Corner(Panel, T.RLg)
-U.Stroke(Panel, T.Border, 2)
+U.Stroke(Panel, T.BorderGlow, 1.5, 0.5)
 
--- Subtle top gradient
-local topGrad = Instance.new("Frame")
-topGrad.BackgroundColor3       = T.Violet
-topGrad.BackgroundTransparency = 0.88
-topGrad.BorderSizePixel        = 0
-topGrad.Size                   = UDim2.new(1, 0, 0, 2)
-topGrad.Position               = UDim2.new(0, 0, 0, 0)
-topGrad.ZIndex                 = 11
-topGrad.Name                   = "TopAccent"
-topGrad.Parent                 = Panel
+-- Subtle top shimmer line
+local shimmer = Instance.new("Frame")
+shimmer.BackgroundColor3       = T.VioletBr
+shimmer.BackgroundTransparency = 0.55
+shimmer.BorderSizePixel        = 0
+shimmer.Size                   = UDim2.new(1,0,0,1)
+shimmer.ZIndex                 = 11
+shimmer.Parent                 = Panel
 
--- ── Title bar ────────────────────────────────────────────────
-local TitleBar = U.Frame({
-    name   = "TitleBar",
-    bg     = T.BGAlt,
-    tr     = 0.05,
-    size   = UDim2.new(1, 0, 0, T.BarH),
-    z      = 11,
-    parent = Panel,
-})
-
--- Logo dot cluster
-local logoDots = Instance.new("Frame")
-logoDots.BackgroundTransparency = 1
-logoDots.Size                   = UDim2.new(0, 48, 0, T.BarH)
-logoDots.Position               = UDim2.new(0, 0, 0, 0)
-logoDots.ZIndex                 = 12
-logoDots.Parent                 = TitleBar
-
-local dotColors = {T.Red, T.Yellow, T.Green}
-for i, dc in ipairs(dotColors) do
+-- Animated dot pulse in header (status indicator)
+local function MakePulse(parent, col, xPos)
     local dot = Instance.new("Frame")
-    dot.BackgroundColor3 = dc
+    dot.BackgroundColor3 = col
     dot.BorderSizePixel  = 0
-    dot.Size             = UDim2.new(0, 10, 0, 10)
-    dot.Position         = UDim2.new(0, 10 + (i-1)*14, 0.5, -5)
-    dot.ZIndex           = 12
-    U.Corner(dot, UDim.new(1, 0))
-    dot.Parent = logoDots
+    dot.Size             = UDim2.new(0,8,0,8)
+    dot.Position         = UDim2.new(0, xPos, 0.5, -4)
+    dot.ZIndex           = 13
+    U.Corner(dot, UDim.new(1,0))
+    dot.Parent = parent
+
+    local function pulse()
+        U.Tween(dot, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+            {BackgroundTransparency = 0.6})
+    end
+    task.delay(math.random()*0.5, pulse)
+    return dot
 end
 
--- Title text
-U.Label({
-    text   = "APEX ADMIN",
-    col    = T.TxtPri,
-    font   = T.FontBold,
-    sz     = T.SzTitle,
-    size   = UDim2.new(1, -120, 1, 0),
-    pos    = UDim2.new(0, 56, 0, 0),
-    z      = 12,
-    parent = TitleBar,
+-- Title bar
+local TitleBar = U.Frame({
+    name="TitleBar", bg=T.GlassMid, tr=T.SurfTr,
+    size=UDim2.new(1,0,0,T.BarH), z=11, parent=Panel,
 })
+U.Stroke(TitleBar, T.Border, 1)
 
--- Version badge
-local verBadge = U.Frame({
-    name   = "VerBadge",
-    bg     = T.Violet,
-    tr     = 0.65,
-    size   = UDim2.new(0, 32, 0, 16),
-    pos    = UDim2.new(0, 152, 0.5, -8),
-    z      = 12,
-    parent = TitleBar,
-})
-U.Corner(verBadge, T.RPill)
-U.Label({text="v1.0",col=T.TxtPri,font=T.FontBold,sz=9,
-    size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=13, parent=verBadge})
+local dotHolder = Instance.new("Frame")
+dotHolder.BackgroundTransparency = 1
+dotHolder.Size     = UDim2.new(0,46,0,T.BarH)
+dotHolder.ZIndex   = 12
+dotHolder.Parent   = TitleBar
 
--- Window controls (minimize / close)
-local ctrlW = 28
+MakePulse(dotHolder, T.Red,    10)
+MakePulse(dotHolder, T.Yellow, 24)
+MakePulse(dotHolder, T.Green,  38)
+
+U.Label({text="APEX ADMIN", col=T.TxtPri, font=T.FontBold, sz=T.SzTitle,
+    size=UDim2.new(1,-140,1,0), pos=UDim2.new(0,52,0,0), z=12, parent=TitleBar})
+
+-- v2 badge
+local vbadge = U.Frame({bg=T.Violet, tr=0.60,
+    size=UDim2.new(0,30,0,14), pos=UDim2.new(0,148,0.5,-7), z=12, parent=TitleBar})
+U.Corner(vbadge, T.RPill)
+U.Label({text="v2", col=T.TxtPri, font=T.FontBold, sz=9,
+    xa=Enum.TextXAlignment.Center, z=13, parent=vbadge})
+
+-- Window controls
 local function MakeCtrl(icon, col, xOff)
-    local btn = U.Button({
-        bg   = col,
-        tr   = 0.7,
-        size = UDim2.new(0, ctrlW, 0, ctrlW),
-        pos  = UDim2.new(1, xOff, 0.5, -math.floor(ctrlW/2)),
-        text = "",
-        z    = 13,
-        parent = TitleBar,
-    })
-    U.Corner(btn, UDim.new(1, 0))
-    U.Stroke(btn, T.Border, 1.5)
-    U.Label({text=icon, col=Color3.new(1,1,1), font=T.FontBold, sz=12,
-        size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=14, parent=btn})
-    U.Hover(btn, col, Color3.new(1,1,1), 0.7, 0.4)
+    local btn = U.Button({bg=col, tr=0.65,
+        size=UDim2.new(0,26,0,26), pos=UDim2.new(1,xOff,0.5,-13),
+        text="", z=13, parent=TitleBar})
+    U.Corner(btn, UDim.new(1,0))
+    U.Stroke(btn, T.Border, 1)
+    U.Label({text=icon, col=Color3.new(1,1,1), font=T.FontBold, sz=11,
+        xa=Enum.TextXAlignment.Center, z=14, parent=btn})
+    U.Hover(btn, col, Color3.new(1,1,1), 0.65, 0.35)
     return btn
 end
 
-local CloseBtn    = MakeCtrl("✕", T.Red,    -14)
-local MinimizeBtn = MakeCtrl("−", T.Yellow, -48)
-local HelpBtn     = MakeCtrl("?", T.Cyan,   -82)
+local CloseBtn    = MakeCtrl("✕", T.Red,    -12)
+local MinimizeBtn = MakeCtrl("−", T.Yellow, -44)
+local HelpBtn     = MakeCtrl("?", T.Cyan,   -76)
 
--- ── Search bar ───────────────────────────────────────────────
+-- ── Search bar
 local SearchBarHolder = U.Frame({
-    name   = "SearchBar",
-    bg     = T.Surface,
-    tr     = T.SurfTrans,
-    size   = UDim2.new(1, -24, 0, 36),
-    pos    = UDim2.new(0, 12, 0, T.BarH + 10),
-    clip   = false,
-    z      = 11,
-    parent = Panel,
+    name="SearchBar", bg=T.GlassSurf, tr=T.SurfTr,
+    size=UDim2.new(1,-24,0,34), pos=UDim2.new(0,12,0,T.BarH+8),
+    clip=false, z=11, parent=Panel,
 })
 U.Corner(SearchBarHolder, T.R)
-U.Stroke(SearchBarHolder, T.Border, 2)
+U.Stroke(SearchBarHolder, T.Border, 1.5)
 
--- Accent line on focus
 local SearchAccent = Instance.new("Frame")
 SearchAccent.BackgroundColor3       = T.Violet
-SearchAccent.BackgroundTransparency = 0.4
+SearchAccent.BackgroundTransparency = 0.45
 SearchAccent.BorderSizePixel        = 0
-SearchAccent.Size                   = UDim2.new(0, 0, 0, 2)
-SearchAccent.Position               = UDim2.new(0, 0, 1, -1)
+SearchAccent.Size                   = UDim2.new(0,0,0,2)
+SearchAccent.Position               = UDim2.new(0,0,1,-1)
 SearchAccent.ZIndex                 = 13
-SearchAccent.Name                   = "Accent"
 U.Corner(SearchAccent, UDim.new(0,2))
 SearchAccent.Parent = SearchBarHolder
 
--- Search icon
-U.Label({text="⌕", col=T.TxtDim, font=T.FontBold, sz=18,
-    size=UDim2.new(0,34,1,0), xa=Enum.TextXAlignment.Center, z=12, parent=SearchBarHolder})
+U.Label({text="⌕", col=T.TxtDim, font=T.FontBold, sz=16,
+    size=UDim2.new(0,32,1,0), xa=Enum.TextXAlignment.Center, z=12, parent=SearchBarHolder})
 
--- TextBox
 local SearchBox = Instance.new("TextBox")
 SearchBox.BackgroundTransparency = 1
-SearchBox.PlaceholderText        = "Search commands or type :command ..."
+SearchBox.PlaceholderText        = "Search or type :command ..."
 SearchBox.PlaceholderColor3      = T.TxtDim
 SearchBox.Text                   = ""
 SearchBox.TextColor3             = T.TxtInput
@@ -699,140 +608,110 @@ SearchBox.Font                   = T.FontMono
 SearchBox.TextSize               = T.SzInput
 SearchBox.TextXAlignment         = Enum.TextXAlignment.Left
 SearchBox.ClearTextOnFocus       = false
-SearchBox.Size                   = UDim2.new(1, -80, 1, 0)
-SearchBox.Position               = UDim2.new(0, 34, 0, 0)
+SearchBox.Size                   = UDim2.new(1,-76,1,0)
+SearchBox.Position               = UDim2.new(0,32,0,0)
 SearchBox.ZIndex                 = 12
 SearchBox.Name                   = "Input"
 SearchBox.Parent                 = SearchBarHolder
 
--- Keyboard shortcut hint
-U.Label({text="↵ Run", col=T.TxtDim, font=T.FontLight, sz=T.SzSmall,
-    size=UDim2.new(0,46,1,0), pos=UDim2.new(1,-46,0,0),
+U.Label({text="↵", col=T.TxtDim, font=T.FontLight, sz=T.SzSmall,
+    size=UDim2.new(0,44,1,0), pos=UDim2.new(1,-44,0,0),
     xa=Enum.TextXAlignment.Right, z=12, parent=SearchBarHolder})
 
--- ── Autocomplete dropdown ─────────────────────────────────────
+-- Dropdown
 local DropFrame = U.Frame({
-    name   = "Dropdown",
-    bg     = T.BGAlt,
-    tr     = 0.04,
-    size   = UDim2.new(1, 0, 0, 0),
-    pos    = UDim2.new(0, 0, 1, 4),
-    clip   = true,
-    z      = 20,
-    parent = SearchBarHolder,
+    name="Dropdown", bg=T.GlassMid, tr=0.08,
+    size=UDim2.new(1,0,0,0), pos=UDim2.new(0,0,1,4),
+    clip=true, z=20, parent=SearchBarHolder,
 })
 U.Corner(DropFrame, T.R)
-U.Stroke(DropFrame, T.Border, 2)
+U.Stroke(DropFrame, T.Border, 1.5)
 
 local DropScroll = Instance.new("ScrollingFrame")
 DropScroll.BackgroundTransparency = 1
 DropScroll.BorderSizePixel        = 0
-DropScroll.Size                   = UDim2.new(1, 0, 1, 0)
-DropScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+DropScroll.Size                   = UDim2.new(1,0,1,0)
+DropScroll.CanvasSize             = UDim2.new(0,0,0,0)
 DropScroll.ScrollBarThickness     = 3
 DropScroll.ScrollBarImageColor3   = T.Violet
 DropScroll.ZIndex                 = 21
 DropScroll.Name                   = "Scroll"
 DropScroll.Parent                 = DropFrame
 U.List(DropScroll, Enum.FillDirection.Vertical, 2)
-U.Pad(DropScroll, 4, 4, 6, 6)
+U.Pad(DropScroll, 4, 4, 4, 4)
 
 local selectedDropIdx = 1
-local dropItems = {}
+local dropItems       = {}
 
--- ── Category tabs ─────────────────────────────────────────────
+-- Tab bar
 local TabBar = U.Frame({
-    name   = "TabBar",
-    bg     = T.BGAlt,
-    tr     = 0.06,
-    size   = UDim2.new(1, -24, 0, 34),
-    pos    = UDim2.new(0, 12, 0, T.BarH + 56),
-    z      = 11,
-    parent = Panel,
+    name="TabBar", bg=T.GlassMid, tr=T.SurfTr,
+    size=UDim2.new(1,-24,0,32), pos=UDim2.new(0,12,0,T.BarH+52),
+    z=11, parent=Panel,
 })
 U.Corner(TabBar, T.R)
-U.Stroke(TabBar, T.Border, 2)
+U.Stroke(TabBar, T.Border, 1.5)
 
 local TabScroll = Instance.new("ScrollingFrame")
 TabScroll.BackgroundTransparency = 1
 TabScroll.BorderSizePixel        = 0
-TabScroll.Size                   = UDim2.new(1, 0, 1, 0)
-TabScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+TabScroll.Size                   = UDim2.new(1,0,1,0)
+TabScroll.CanvasSize             = UDim2.new(0,0,0,0)
 TabScroll.ScrollBarThickness     = 0
 TabScroll.ZIndex                 = 12
-TabScroll.Name                   = "TabScroll"
 TabScroll.ScrollingDirection     = Enum.ScrollingDirection.X
 TabScroll.Parent                 = TabBar
-U.List(TabScroll, Enum.FillDirection.Horizontal, 4, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-U.Pad(TabScroll, 0, 0, 6, 6)
+U.List(TabScroll, Enum.FillDirection.Horizontal, 3,
+    Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+U.Pad(TabScroll, 0, 0, 4, 4)
 
--- ── Command list area ─────────────────────────────────────────
+-- Command list
 local ListFrame = U.Frame({
-    name   = "CommandList",
-    bg     = T.BGAlt,
-    tr     = 0.06,
-    size   = UDim2.new(1, -24, 1, -(T.BarH + 56 + 34 + 60 + 24)),
-    pos    = UDim2.new(0, 12, 0, T.BarH + 56 + 34 + 8),
-    clip   = true,
-    z      = 11,
-    parent = Panel,
+    name="CommandList", bg=T.GlassMid, tr=T.SurfTr,
+    size=UDim2.new(1,-24,1,-(T.BarH+52+32+56+22)),
+    pos=UDim2.new(0,12,0,T.BarH+52+32+6),
+    clip=true, z=11, parent=Panel,
 })
 U.Corner(ListFrame, T.R)
-U.Stroke(ListFrame, T.Border, 2)
+U.Stroke(ListFrame, T.Border, 1.5)
 
 local CmdScroll = Instance.new("ScrollingFrame")
 CmdScroll.BackgroundTransparency = 1
 CmdScroll.BorderSizePixel        = 0
-CmdScroll.Size                   = UDim2.new(1, 0, 1, 0)
-CmdScroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+CmdScroll.Size                   = UDim2.new(1,0,1,0)
+CmdScroll.CanvasSize             = UDim2.new(0,0,0,0)
 CmdScroll.ScrollBarThickness     = 3
 CmdScroll.ScrollBarImageColor3   = T.Violet
 CmdScroll.ZIndex                 = 12
 CmdScroll.Name                   = "CmdScroll"
 CmdScroll.Parent                 = ListFrame
 U.List(CmdScroll, Enum.FillDirection.Vertical, 2)
-U.Pad(CmdScroll, 4, 4, 6, 6)
+U.Pad(CmdScroll, 4, 4, 4, 4)
 
--- ── Status bar ────────────────────────────────────────────────
+-- Status bar
 local StatusBar = U.Frame({
-    name   = "StatusBar",
-    bg     = T.BGAlt,
-    tr     = 0.05,
-    size   = UDim2.new(1, -24, 0, 28),
-    pos    = UDim2.new(0, 12, 1, -40),
-    z      = 11,
-    parent = Panel,
+    name="StatusBar", bg=T.GlassMid, tr=T.SurfTr,
+    size=UDim2.new(1,-24,0,26), pos=UDim2.new(0,12,1,-38),
+    z=11, parent=Panel,
 })
 U.Corner(StatusBar, T.R)
-U.Stroke(StatusBar, T.Border, 2)
-U.Pad(StatusBar, 0, 0, 10, 10)
+U.Stroke(StatusBar, T.Border, 1.5)
+U.Pad(StatusBar, 0, 0, 8, 8)
 
 local StatusLabel = U.Label({
-    text   = "Apex Admin  ·  Ready",
-    col    = T.TxtDim,
-    font   = T.FontLight,
-    sz     = T.SzSmall,
-    z      = 12,
-    parent = StatusBar,
+    text="Apex Admin · Ready", col=T.TxtDim, font=T.FontLight,
+    sz=T.SzSmall, z=12, parent=StatusBar,
 })
-
 local CmdCountLabel = U.Label({
-    text   = "0 commands",
-    col    = T.TxtDim,
-    font   = T.FontLight,
-    sz     = T.SzSmall,
-    xa     = Enum.TextXAlignment.Right,
-    z      = 12,
-    parent = StatusBar,
+    text="0 commands", col=T.TxtDim, font=T.FontLight, sz=T.SzSmall,
+    xa=Enum.TextXAlignment.Right, z=12, parent=StatusBar,
 })
 
--- ══════════════════════════════════════════════════════════════
--- MINIMIZED BAR  (top-center pill when panel is closed)
--- ══════════════════════════════════════════════════════════════
+-- ── Minimized bar
 local MinBar = Instance.new("Frame")
 MinBar.Name                   = "MinBar"
-MinBar.BackgroundColor3       = T.BG
-MinBar.BackgroundTransparency = T.MinBarTrans
+MinBar.BackgroundColor3       = T.Glass
+MinBar.BackgroundTransparency = T.MinBarTr
 MinBar.BorderSizePixel        = 0
 MinBar.Size                   = UDim2.new(0, T.MinBarW, 0, T.MinBarH)
 MinBar.Position               = UDim2.new(0.5, -math.floor(T.MinBarW/2), 0, 6)
@@ -840,134 +719,99 @@ MinBar.ZIndex                 = 10
 MinBar.Visible                = false
 MinBar.Parent                 = ScreenGui
 U.Corner(MinBar, T.RPill)
-U.Stroke(MinBar, T.Border, 2)
+U.Stroke(MinBar, T.Border, 1.5)
 
--- Glow behind minbar
-local minGlow = Instance.new("ImageLabel")
-minGlow.BackgroundTransparency = 1
-minGlow.Image                  = "rbxassetid://5028857084"
-minGlow.ImageColor3            = T.Violet
-minGlow.ImageTransparency      = 0.80
-minGlow.Size                   = UDim2.new(1, 60, 1, 30)
-minGlow.Position               = UDim2.new(0, -30, 0, -15)
-minGlow.ZIndex                 = 9
-minGlow.Parent                 = MinBar
-
--- Accent dot
 local minDot = Instance.new("Frame")
-minDot.BackgroundColor3 = T.Violet
+minDot.BackgroundColor3 = T.Green
 minDot.BorderSizePixel  = 0
-minDot.Size             = UDim2.new(0, 8, 0, 8)
-minDot.Position         = UDim2.new(0, 10, 0.5, -4)
+minDot.Size             = UDim2.new(0,7,0,7)
+minDot.Position         = UDim2.new(0,9,0.5,-3.5)
 minDot.ZIndex           = 11
 U.Corner(minDot, UDim.new(1,0))
 minDot.Parent = MinBar
+U.Tween(minDot, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+    {BackgroundTransparency=0.7})
 
--- MinBar input
 local MinInput = Instance.new("TextBox")
 MinInput.BackgroundTransparency = 1
-MinInput.PlaceholderText        = ":command  or  search..."
+MinInput.PlaceholderText        = ":command or search..."
 MinInput.PlaceholderColor3      = T.TxtDim
 MinInput.Text                   = ""
 MinInput.TextColor3             = T.TxtInput
 MinInput.Font                   = T.FontMono
 MinInput.TextSize               = T.SzBody
-MinInput.TextXAlignment         = Enum.TextXAlignment.Left
 MinInput.ClearTextOnFocus       = false
-MinInput.Size                   = UDim2.new(1, -60, 1, 0)
-MinInput.Position               = UDim2.new(0, 24, 0, 0)
+MinInput.Size                   = UDim2.new(1,-54,1,0)
+MinInput.Position               = UDim2.new(0,20,0,0)
 MinInput.ZIndex                 = 11
-MinInput.Name                   = "MinInput"
 MinInput.Parent                 = MinBar
 
--- Expand arrow in minbar
-local expandBtn = U.Button({
-    bg   = T.Violet,
-    tr   = 0.6,
-    size = UDim2.new(0, 26, 0, 20),
-    pos  = UDim2.new(1, -32, 0.5, -10),
-    text = "▲",
-    col  = T.TxtPri,
-    sz   = 10,
-    z    = 12,
-    parent = MinBar,
-})
+local expandBtn = U.Button({bg=T.Violet, tr=0.55,
+    size=UDim2.new(0,24,0,18), pos=UDim2.new(1,-30,0.5,-9),
+    text="▲", col=T.TxtPri, sz=9, z=12, parent=MinBar})
 U.Corner(expandBtn, T.R)
-U.Stroke(expandBtn, T.Border, 1.5)
+U.Stroke(expandBtn, T.Border, 1)
 
 -- ══════════════════════════════════════════════════════════════
 -- DRAG & RESIZE
 -- ══════════════════════════════════════════════════════════════
 local function MakeDraggable(handle, target)
-    local dragging, dragStart, startPos
+    local drag, dragStart, startPos
     handle.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
         or inp.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
-            dragStart = inp.Position
-            startPos  = target.Position
+            drag=true; dragStart=inp.Position; startPos=target.Position
         end
     end)
     handle.InputEnded:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+        or inp.UserInputType == Enum.UserInputType.Touch then drag=false end
     end)
     UserInputService.InputChanged:Connect(function(inp)
-        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
-        or inp.UserInputType == Enum.UserInputType.Touch) then
-            local delta = inp.Position - dragStart
+        if drag and (inp.UserInputType==Enum.UserInputType.MouseMovement
+        or  inp.UserInputType==Enum.UserInputType.Touch) then
+            local d = inp.Position - dragStart
             target.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
+                startPos.X.Scale, startPos.X.Offset+d.X,
+                startPos.Y.Scale, startPos.Y.Offset+d.Y)
         end
     end)
 end
 
--- Resize grip (bottom-right corner)
-local ResizeGrip = Instance.new("TextButton")
-ResizeGrip.BackgroundColor3       = T.Violet
-ResizeGrip.BackgroundTransparency = 0.75
-ResizeGrip.BorderSizePixel        = 0
-ResizeGrip.Size                   = UDim2.new(0, T.ResizeGrip, 0, T.ResizeGrip)
-ResizeGrip.Position               = UDim2.new(1, -T.ResizeGrip, 1, -T.ResizeGrip)
-ResizeGrip.Text                   = ""
-ResizeGrip.ZIndex                 = 15
-ResizeGrip.Name                   = "Resize"
-U.Corner(ResizeGrip, UDim.new(0,3))
-ResizeGrip.Parent = Panel
-
 do
-    local resizing, resStart, resSize
-    ResizeGrip.InputBegan:Connect(function(inp)
+    local res, resStart, resSize
+    local grip = Instance.new("TextButton")
+    grip.BackgroundColor3       = T.Violet
+    grip.BackgroundTransparency = 0.70
+    grip.BorderSizePixel        = 0
+    grip.Size                   = UDim2.new(0,T.ResizeGrip,0,T.ResizeGrip)
+    grip.Position               = UDim2.new(1,-T.ResizeGrip,1,-T.ResizeGrip)
+    grip.Text                   = ""; grip.ZIndex = 15
+    U.Corner(grip, UDim.new(0,3))
+    grip.Parent = Panel
+
+    grip.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            resizing = true
-            resStart = Vector2.new(inp.Position.X, inp.Position.Y)
-            resSize  = Vector2.new(PanelRoot.Size.X.Offset, PanelRoot.Size.Y.Offset)
+            res=true; resStart=Vector2.new(inp.Position.X,inp.Position.Y)
+            resSize=Vector2.new(PanelRoot.Size.X.Offset, PanelRoot.Size.Y.Offset)
         end
     end)
-    ResizeGrip.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            resizing = false
-        end
+    grip.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then res=false end
     end)
     UserInputService.InputChanged:Connect(function(inp)
-        if resizing and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = Vector2.new(inp.Position.X, inp.Position.Y) - resStart
-            local nw    = math.max(420, resSize.X + delta.X)
-            local nh    = math.max(320, resSize.Y + delta.Y)
-            PanelRoot.Size = UDim2.new(0, nw, 0, nh)
+        if res and inp.UserInputType==Enum.UserInputType.MouseMovement then
+            local d  = Vector2.new(inp.Position.X,inp.Position.Y)-resStart
+            PanelRoot.Size = UDim2.new(0,math.max(420,resSize.X+d.X),0,math.max(300,resSize.Y+d.Y))
         end
     end)
 end
 
 MakeDraggable(TitleBar, PanelRoot)
-MakeDraggable(MinBar, MinBar)
+MakeDraggable(MinBar,   MinBar)
 
 -- ══════════════════════════════════════════════════════════════
--- VISIBILITY CONTROLLER
+-- VISIBILITY
 -- ══════════════════════════════════════════════════════════════
 local GuiVisible = true
 
@@ -976,259 +820,157 @@ local function SetVisible(vis)
     if vis then
         PanelRoot.Visible = true
         MinBar.Visible    = false
-        U.Tween(Panel, T.Med, {BackgroundTransparency = T.BGTrans})
-        U.Tween(PanelRoot, T.Bounce, {
-            Size     = UDim2.new(0, PanelRoot.Size.X.Offset, 0, PanelRoot.Size.Y.Offset),
-            Position = PanelRoot.Position,
-        })
+        U.Tween(Panel, T.Med, {BackgroundTransparency=T.PanelTr})
         task.defer(function() SearchBox:CaptureFocus() end)
     else
-        MinBar.Visible    = true
-        U.Tween(Panel, T.Med, {BackgroundTransparency = 1})
-        task.delay(0.22, function()
-            if not GuiVisible then PanelRoot.Visible = false end
-        end)
+        MinBar.Visible = true
+        U.Tween(Panel, T.Med, {BackgroundTransparency=1})
+        task.delay(0.22, function() if not GuiVisible then PanelRoot.Visible=false end end)
     end
 end
 
 MinimizeBtn.MouseButton1Click:Connect(function() SetVisible(false) end)
 CloseBtn.MouseButton1Click:Connect(function()
-    U.Tween(Panel, T.Med, {BackgroundTransparency = 1})
-    task.delay(0.25, function() PanelRoot.Visible = false; MinBar.Visible = false end)
+    U.Tween(Panel, T.Med, {BackgroundTransparency=1})
+    task.delay(0.25, function() PanelRoot.Visible=false; MinBar.Visible=false end)
     GuiVisible = false
 end)
 expandBtn.MouseButton1Click:Connect(function() SetVisible(true) end)
 
 -- ══════════════════════════════════════════════════════════════
--- CATEGORY TAB BUILDER
+-- TABS & COMMAND LIST
 -- ══════════════════════════════════════════════════════════════
-local activeTab    = "All"
-local tabButtons   = {}
+local activeTab  = "All"
+local tabButtons = {}
+
+local function BuildCommandList(query)
+    query = query or SearchBox.Text
+    local clean = query:match("^:?(.*)") or ""
+    for _, ch in ipairs(CmdScroll:GetChildren()) do
+        if ch:IsA("Frame") or ch:IsA("TextButton") then ch:Destroy() end
+    end
+    local results = Registry:Search(clean, 100)
+    if activeTab ~= "All" then
+        local f={}
+        for _, d in ipairs(results) do
+            if d.category==activeTab then table.insert(f,d) end
+        end
+        results=f
+    end
+    if #results==0 then
+        U.Label({text="No commands found.", col=T.TxtDim, font=T.FontLight, sz=T.SzBody,
+            size=UDim2.new(1,0,0,38), xa=Enum.TextXAlignment.Center, z=13, parent=CmdScroll})
+        CmdScroll.CanvasSize = UDim2.new(0,0,0,38)
+        return
+    end
+    local totalH = 0
+    for i, def in ipairs(results) do
+        local cd = Registry.CategoryDefs[def.category] or {}
+        local ac = cd.col or T.Violet
+        local ic = cd.icon or "◆"
+        local row = U.Frame({name="Row_"..i, bg=T.GlassSurf, tr=T.RowTr,
+            size=UDim2.new(1,-4,0,44), clip=false, z=13, parent=CmdScroll})
+        row.LayoutOrder = i
+        U.Corner(row, T.R)
+        U.Stroke(row, T.Border, 1)
+
+        local ab = Instance.new("Frame")
+        ab.BackgroundColor3=ac; ab.BorderSizePixel=0
+        ab.Size=UDim2.new(0,3,1,0); ab.ZIndex=14
+        U.Corner(ab, UDim.new(0,3)); ab.Parent=row
+
+        U.Label({text=ic, col=ac, font=T.FontBold, sz=13,
+            size=UDim2.new(0,30,1,0), pos=UDim2.new(0,7,0,0),
+            xa=Enum.TextXAlignment.Center, z=14, parent=row})
+
+        U.Label({text=U.HighlightMatch(":"..def.aliases[1], ":"..clean),
+            col=T.TxtPri, font=T.FontBold, sz=T.SzBody,
+            size=UDim2.new(0.45,-36,0,20), pos=UDim2.new(0,38,0,3),
+            rich=true, z=14, parent=row})
+
+        if #def.aliases > 1 then
+            local short = {}
+            for ai = 2, math.min(#def.aliases, 5) do
+                table.insert(short, ":"..def.aliases[ai])
+            end
+            U.Label({text=table.concat(short, "  "), col=T.TxtDim, font=T.FontLight, sz=T.SzSmall,
+                size=UDim2.new(0.45,-36,0,14), pos=UDim2.new(0,38,0,24),
+                z=14, parent=row})
+        end
+
+        U.Label({text=def.description or "", col=T.TxtSec, font=T.FontLight, sz=T.SzSmall,
+            size=UDim2.new(0.5,-8,1,0), pos=UDim2.new(0.5,0,0,0), z=14, parent=row})
+
+        local bw = math.max(40, #def.category * 7 + 10)
+        local badge = U.Frame({bg=ac, tr=0.70,
+            size=UDim2.new(0,bw,0,14), pos=UDim2.new(1,-(bw+8),0.5,-7), z=14, parent=row})
+        U.Corner(badge, T.RPill)
+        U.Label({text=def.category, col=T.TxtPri, font=T.FontBold, sz=T.SzTag,
+            xa=Enum.TextXAlignment.Center, z=15, parent=badge})
+
+        U.Hover(row, T.GlassSurf, T.GlassHov, T.RowTr, 0.04)
+
+        local ca = U.Button({bg=Color3.new(0,0,0), tr=1, size=UDim2.new(1,0,1,0), z=15, parent=row})
+        ca.MouseButton1Click:Connect(function()
+            SearchBox.Text = ":"..def.aliases[1].." "
+            SearchBox:CaptureFocus()
+            SearchBox.CursorPosition = #SearchBox.Text+1
+        end)
+        totalH = totalH + 46
+    end
+    CmdScroll.CanvasSize = UDim2.new(0,0,0,totalH+8)
+    CmdCountLabel.Text   = #results.." commands"
+end
 
 local function BuildTabs()
     for _, ch in ipairs(TabScroll:GetChildren()) do
         if ch:IsA("TextButton") then ch:Destroy() end
     end
     tabButtons = {}
-
-    local tabList = {
-        { key="All", label="All", icon="★", col=T.Violet }
-    }
-    local sortedCats = {}
-    for catKey, catDef in pairs(Registry.CategoryDefs) do
-        if Registry._cats[catKey] and #Registry._cats[catKey] > 0 then
-            table.insert(sortedCats, { key=catKey, def=catDef })
+    local list = {{ key="All", label="All", icon="★", col=T.Violet }}
+    local sorted = {}
+    for k, d in pairs(Registry.CategoryDefs) do
+        if Registry._cats[k] and #Registry._cats[k]>0 then
+            table.insert(sorted, {key=k, def=d})
         end
     end
-    table.sort(sortedCats, function(a,b) return a.def.order < b.def.order end)
-    for _, c in ipairs(sortedCats) do
-        table.insert(tabList, { key=c.key, label=c.def.label, icon=c.def.icon, col=c.def.col })
+    table.sort(sorted, function(a,b) return a.def.order < b.def.order end)
+    for _, c in ipairs(sorted) do
+        table.insert(list, {key=c.key, label=c.def.label, icon=c.def.icon, col=c.def.col})
     end
-
-    for _, tab in ipairs(tabList) do
-        local labelW = U.TextWidth(tab.icon.." "..tab.label, T.FontBold, T.SzSmall)
-        local btnW   = math.max(56, labelW + 20)
-
-        local btn = U.Button({
-            bg   = tab.key == activeTab and T.Violet or T.Surface,
-            tr   = tab.key == activeTab and 0.65    or T.SurfTrans,
-            size = UDim2.new(0, btnW, 0, 24),
-            text = tab.icon .. " " .. tab.label,
-            col  = tab.key == activeTab and T.TxtPri or T.TxtSec,
-            font = T.FontBold,
-            sz   = T.SzSmall,
-            z    = 13,
-        })
+    for _, tab in ipairs(list) do
+        local w   = math.max(52, #(tab.icon.." "..tab.label) * 7 + 14)
+        local sel = tab.key == activeTab
+        local btn = U.Button({bg=sel and T.Violet or T.GlassSurf,
+            tr=sel and 0.60 or T.SurfTr,
+            size=UDim2.new(0,w,0,22), text=tab.icon.." "..tab.label,
+            col=sel and T.TxtPri or T.TxtSec,
+            font=T.FontBold, sz=T.SzSmall, z=13})
         U.Corner(btn, T.RPill)
-        U.Stroke(btn, T.Border, 1.5)
+        U.Stroke(btn, T.Border, 1)
         U.Ripple(btn)
-
         btn.MouseButton1Click:Connect(function()
             activeTab = tab.key
             BuildTabs()
-            -- rebuild command list for new tab
             BuildCommandList(SearchBox.Text)
         end)
-        btn.LayoutOrder = tab.key == "All" and 0 or tab.def and tab.def.order or 99
+        btn.LayoutOrder = tab.key=="All" and 0 or (tab.def and tab.def.order or 99)
         btn.Parent = TabScroll
         tabButtons[tab.key] = btn
     end
-
-    -- recalc canvas
-    local total = 0
+    local tot=0
     for _, ch in ipairs(TabScroll:GetChildren()) do
-        if ch:IsA("TextButton") then total = total + ch.Size.X.Offset + 4 end
+        if ch:IsA("TextButton") then tot=tot+ch.Size.X.Offset+3 end
     end
-    TabScroll.CanvasSize = UDim2.new(0, total + 12, 0, 0)
+    TabScroll.CanvasSize = UDim2.new(0,tot+8,0,0)
 end
 
 -- ══════════════════════════════════════════════════════════════
--- COMMAND LIST RENDERER
--- ══════════════════════════════════════════════════════════════
-function BuildCommandList(query)
-    query = query or SearchBox.Text
-    -- strip leading colon for search
-    local cleanQuery = query:match("^:?(.*)") or ""
-
-    for _, ch in ipairs(CmdScroll:GetChildren()) do
-        if ch:IsA("Frame") or ch:IsA("TextButton") then ch:Destroy() end
-    end
-
-    local results = Registry:Search(cleanQuery, 60)
-
-    -- filter by tab
-    if activeTab ~= "All" then
-        local filtered = {}
-        for _, def in ipairs(results) do
-            if def.category == activeTab then
-                table.insert(filtered, def)
-            end
-        end
-        results = filtered
-    end
-
-    if #results == 0 then
-        U.Label({
-            text   = "No commands found.",
-            col    = T.TxtDim,
-            font   = T.FontLight,
-            sz     = T.SzBody,
-            size   = UDim2.new(1, 0, 0, 40),
-            xa     = Enum.TextXAlignment.Center,
-            z      = 13,
-            parent = CmdScroll,
-        })
-        CmdScroll.CanvasSize = UDim2.new(0, 0, 0, 40)
-        return
-    end
-
-    local totalH = 0
-    for i, def in ipairs(results) do
-        local catDef  = Registry.CategoryDefs[def.category] or {}
-        local accentC = catDef.col or T.Violet
-        local icon    = catDef.icon or "◆"
-
-        local row = U.Frame({
-            name   = "Row_"..i,
-            bg     = T.Surface,
-            tr     = T.SurfTrans,
-            size   = UDim2.new(1, -4, 0, 48),
-            z      = 13,
-            clip   = false,
-            parent = CmdScroll,
-        })
-        row.LayoutOrder = i
-        U.Corner(row, T.R)
-        U.Stroke(row, T.Border, 1.5)
-
-        -- Left accent bar
-        local accBar = Instance.new("Frame")
-        accBar.BackgroundColor3 = accentC
-        accBar.BorderSizePixel  = 0
-        accBar.Size             = UDim2.new(0, 3, 1, 0)
-        accBar.Position         = UDim2.new(0, 0, 0, 0)
-        accBar.ZIndex           = 14
-        U.Corner(accBar, UDim.new(0,3))
-        accBar.Parent = row
-
-        -- Category icon
-        U.Label({
-            text   = icon,
-            col    = accentC,
-            font   = T.FontBold,
-            sz     = 14,
-            size   = UDim2.new(0, 32, 1, 0),
-            pos    = UDim2.new(0, 8, 0, 0),
-            xa     = Enum.TextXAlignment.Center,
-            z      = 14,
-            parent = row,
-        })
-
-        -- Command name (highlighted)
-        local displayName = ":"..def.aliases[1]
-        local nameLbl = U.Label({
-            text   = U.HighlightMatch(displayName, ":"..cleanQuery),
-            col    = T.TxtPri,
-            font   = T.FontBold,
-            sz     = T.SzBody,
-            size   = UDim2.new(0.5, -40, 0, 22),
-            pos    = UDim2.new(0, 42, 0, 4),
-            rich   = true,
-            z      = 14,
-            parent = row,
-        })
-
-        -- Aliases (small)
-        if #def.aliases > 1 then
-            local aliasStr = table.concat({table.unpack(def.aliases, 2, math.min(#def.aliases, 4))}, "  :")
-            U.Label({
-                text   = ":"..aliasStr,
-                col    = T.TxtDim,
-                font   = T.FontLight,
-                sz     = T.SzSmall,
-                size   = UDim2.new(0.4, 0, 0, 16),
-                pos    = UDim2.new(0, 42, 0, 26),
-                z      = 14,
-                parent = row,
-            })
-        end
-
-        -- Description
-        U.Label({
-            text   = def.description or "",
-            col    = T.TxtSec,
-            font   = T.FontLight,
-            sz     = T.SzSmall,
-            size   = UDim2.new(0.5, -10, 1, 0),
-            pos    = UDim2.new(0.5, 0, 0, 0),
-            z      = 14,
-            parent = row,
-        })
-
-        -- Category badge
-        local badgeW = U.TextWidth(def.category, T.FontBold, T.SzTag) + 14
-        local badge  = U.Frame({
-            bg   = accentC,
-            tr   = 0.72,
-            size = UDim2.new(0, badgeW, 0, 16),
-            pos  = UDim2.new(1, -(badgeW+10), 0.5, -8),
-            z    = 14,
-            parent = row,
-        })
-        U.Corner(badge, T.RPill)
-        U.Label({text=def.category, col=T.TxtPri, font=T.FontBold, sz=T.SzTag,
-            size=UDim2.new(1,0,1,0), xa=Enum.TextXAlignment.Center, z=15, parent=badge})
-
-        -- Hover
-        U.Hover(row, T.Surface, T.SurfaceHov, T.SurfTrans, 0)
-
-        -- Click to insert command in searchbox
-        local clickArea = U.Button({
-            bg   = Color3.new(0,0,0),
-            tr   = 1,
-            size = UDim2.new(1, 0, 1, 0),
-            z    = 15,
-            parent = row,
-        })
-        clickArea.MouseButton1Click:Connect(function()
-            SearchBox.Text = ":"..def.aliases[1].." "
-            SearchBox:CaptureFocus()
-            SearchBox.CursorPosition = #SearchBox.Text + 1
-        end)
-
-        totalH = totalH + 50
-    end
-
-    CmdScroll.CanvasSize = UDim2.new(0, 0, 0, totalH + 8)
-    CmdCountLabel.Text = #results .. " commands"
-end
-
--- ══════════════════════════════════════════════════════════════
--- AUTOCOMPLETE DROPDOWN LOGIC
+-- DROPDOWN
 -- ══════════════════════════════════════════════════════════════
 local function HideDropdown()
-    U.Tween(DropFrame, T.Fast, {Size = UDim2.new(1, 0, 0, 0)})
-    selectedDropIdx = 1
+    U.Tween(DropFrame, T.Fast, {Size=UDim2.new(1,0,0,0)})
+    selectedDropIdx=1
 end
 
 local function ShowDropdown(defs)
@@ -1236,125 +978,99 @@ local function ShowDropdown(defs)
         if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
     end
     dropItems = defs
-
-    if #defs == 0 then HideDropdown(); return end
-
-    local rowH   = 36
-    local maxVis = math.min(#defs, 7)
-    local totalH = rowH * #defs + 8
-
+    if #defs==0 then HideDropdown(); return end
+    local rowH  = 34
     for i, def in ipairs(defs) do
-        local catDef = Registry.CategoryDefs[def.category] or {}
-        local row    = U.Button({
-            bg   = i == selectedDropIdx and T.SurfaceSel or T.Surface,
-            tr   = i == selectedDropIdx and 0           or T.SurfTrans,
-            size = UDim2.new(1, 0, 0, rowH),
-            text = "",
-            z    = 22,
-        })
-        row.LayoutOrder = i
-        U.Corner(row, T.R)
+        local cd = Registry.CategoryDefs[def.category] or {}
+        local sel = i==selectedDropIdx
+        local row = U.Button({bg=sel and T.GlassSel or T.GlassSurf,
+            tr=sel and 0 or T.SurfTr, size=UDim2.new(1,0,0,rowH), text="", z=22})
+        row.LayoutOrder=i; U.Corner(row, T.R)
 
-        local nameStr = ":"..def.aliases[1]
-        if #def.args > 0 then
-            local argHints = {}
+        local ns = ":"..def.aliases[1]
+        if def.args and #def.args>0 then
+            local hints={}
             for _, a in ipairs(def.args) do
-                table.insert(argHints, a.optional and "["..a.name.."]" or "<"..a.name..">")
+                table.insert(hints, a.optional and "["..a.name.."]" or "<"..a.name..">")
             end
-            nameStr = nameStr .. " " .. table.concat(argHints, " ")
+            ns = ns.." "..table.concat(hints," ")
         end
 
-        U.Label({text=(catDef.icon or "◆"), col=catDef.col or T.Violet, font=T.FontBold, sz=13,
-            size=UDim2.new(0,26,1,0), pos=UDim2.new(0,6,0,0), xa=Enum.TextXAlignment.Center, z=23, parent=row})
-        U.Label({text=nameStr, col=T.TxtPri, font=T.FontMono, sz=T.SzBody,
-            size=UDim2.new(0.6,-32,1,0), pos=UDim2.new(0,32,0,0), z=23, parent=row})
+        U.Label({text=cd.icon or "◆", col=cd.col or T.Violet, font=T.FontBold, sz=12,
+            size=UDim2.new(0,24,1,0), pos=UDim2.new(0,4,0,0),
+            xa=Enum.TextXAlignment.Center, z=23, parent=row})
+        U.Label({text=ns, col=T.TxtPri, font=T.FontMono, sz=T.SzBody,
+            size=UDim2.new(0.58,-28,1,0), pos=UDim2.new(0,28,0,0), z=23, parent=row})
         U.Label({text=def.description or "", col=T.TxtSec, font=T.FontLight, sz=T.SzSmall,
-            size=UDim2.new(0.4,0,1,0), pos=UDim2.new(0.6,0,0,0), z=23, parent=row})
+            size=UDim2.new(0.42,0,1,0), pos=UDim2.new(0.58,0,0,0), z=23, parent=row})
 
         row.MouseButton1Click:Connect(function()
             SearchBox.Text = ":"..def.aliases[1].." "
-            SearchBox.CursorPosition = #SearchBox.Text + 1
+            SearchBox.CursorPosition = #SearchBox.Text+1
             HideDropdown()
         end)
-
-        U.Hover(row,
-            i == selectedDropIdx and T.SurfaceSel or T.Surface,
-            T.SurfaceHov,
-            i == selectedDropIdx and 0 or T.SurfTrans, 0)
-
         row.Parent = DropScroll
     end
-
-    DropScroll.CanvasSize = UDim2.new(0, 0, 0, totalH)
-    local visH = math.min(maxVis * rowH + 8, T.DropMaxH)
-    U.Tween(DropFrame, T.Med, {Size = UDim2.new(1, 0, 0, visH)})
+    DropScroll.CanvasSize = UDim2.new(0,0,0, rowH*#defs+8)
+    local vis = math.min(#defs*rowH+8, T.DropMaxH)
+    U.Tween(DropFrame, T.Med, {Size=UDim2.new(1,0,0,vis)})
 end
 
-local function UpdateDropSelection(idx)
+local function UpdateDropSel(idx)
     selectedDropIdx = math.max(1, math.min(#dropItems, idx))
     for i, ch in ipairs(DropScroll:GetChildren()) do
         if ch:IsA("TextButton") then
-            local isSel = i == selectedDropIdx
+            local s = i==selectedDropIdx
             U.Tween(ch, T.Fast, {
-                BackgroundColor3       = isSel and T.SurfaceSel or T.Surface,
-                BackgroundTransparency = isSel and 0            or T.SurfTrans,
+                BackgroundColor3       = s and T.GlassSel or T.GlassSurf,
+                BackgroundTransparency = s and 0         or T.SurfTr,
             })
         end
     end
 end
 
 -- ══════════════════════════════════════════════════════════════
--- COMMAND EXECUTOR
+-- EXECUTOR
 -- ══════════════════════════════════════════════════════════════
 local function ExecCommand(rawInput)
-    rawInput = rawInput:match("^%s*(.-)%s*$")  -- trim
-    if rawInput == "" then return end
-
+    rawInput = rawInput:match("^%s*(.-)%s*$")
+    if rawInput=="" then return end
     History:Push(rawInput)
     History:ResetCursor()
 
     local stripped = rawInput:match("^:(.+)") or rawInput
     local tokens   = U.ParseArgs(stripped)
-    if #tokens == 0 then return end
+    if #tokens==0 then return end
 
-    local cmdKey  = tokens[1]:lower()
-    local cmdArgs = { table.unpack(tokens, 2) }
+    local key  = tokens[1]:lower()
+    local args = {table.unpack(tokens,2)}
+    local def  = Registry:Get(key)
 
-    local def = Registry:Get(cmdKey)
     if not def then
-        Notif.Push("Unknown command: :"..cmdKey, "error", 3)
-        StatusLabel.Text = "Unknown: :"..cmdKey
+        Notif.Push("Unknown: :"..key, "error", 2.5)
+        StatusLabel.Text = "Unknown: :"..key
         return
     end
 
     StatusLabel.Text = "Ran: :"..def.aliases[1]
 
-    local ok, err = pcall(def.execute, cmdArgs, rawInput, {
-        player  = LP,
-        notif   = Notif,
-        registry = Registry,
+    local ok, err = pcall(def.execute, args, rawInput, {
+        player=LP, notif=Notif, registry=Registry, loops=ENV.ApexLoops,
     })
-
     if not ok then
         Notif.Push("Error: "..tostring(err), "error", 4)
         StatusLabel.Text = "Error in :"..def.aliases[1]
     end
 end
 
--- ══════════════════════════════════════════════════════════════
--- SEARCH / INPUT WIRING
--- ══════════════════════════════════════════════════════════════
+-- ── Input wiring
 local function HandleInput(text)
-    local stripped = text:match("^:?(.*)") or ""
-
-    if text:sub(1,1) == ":" and #stripped > 0 then
-        -- show autocomplete
-        local matches = Registry:Search(stripped, 8)
-        ShowDropdown(matches)
+    local s = text:match("^:?(.*)") or ""
+    if text:sub(1,1)==":" and #s>0 then
+        ShowDropdown(Registry:Search(s, 8))
     else
         HideDropdown()
     end
-
     BuildCommandList(text)
 end
 
@@ -1362,453 +1078,1590 @@ SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
     HandleInput(SearchBox.Text)
 end)
 
-SearchBox.FocusLost:Connect(function(enterPressed)
-    if enterPressed then
+SearchBox.FocusLost:Connect(function(enter)
+    if enter then
         local text = SearchBox.Text:match("^%s*(.-)%s*$")
-        if text:sub(1,1) == ":" then
-            -- if item selected in dropdown, use that
-            if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
+        if text:sub(1,1)==":" then
+            if #dropItems>0 and DropFrame.Size.Y.Offset>0 then
                 ExecCommand(":"..dropItems[selectedDropIdx].aliases[1])
             else
                 ExecCommand(text)
             end
         end
-        SearchBox.Text = ""
-        HideDropdown()
-        BuildCommandList("")
+        SearchBox.Text=""; HideDropdown(); BuildCommandList("")
     else
         HideDropdown()
     end
 end)
 
--- Focus line animation
 SearchBox.Focused:Connect(function()
-    U.Tween(SearchAccent, T.Med, {Size = UDim2.new(1, 0, 0, 2)})
-    U.Tween(SearchBarHolder, T.Med, {})
+    U.Tween(SearchAccent, T.Med, {Size=UDim2.new(1,0,0,2)})
 end)
 
--- Keyboard navigation
 UserInputService.InputBegan:Connect(function(inp, gpe)
     if gpe then return end
-
-    -- Toggle panel: F2
-    if inp.KeyCode == Enum.KeyCode.F2 then
-        if PanelRoot.Visible or MinBar.Visible then
-            SetVisible(not GuiVisible)
-        else
-            PanelRoot.Visible = true
-            SetVisible(true)
-        end
+    if inp.KeyCode==Enum.KeyCode.F2 then
+        if PanelRoot.Visible or MinBar.Visible then SetVisible(not GuiVisible)
+        else PanelRoot.Visible=true; SetVisible(true) end
     end
-
-    -- Focus search: /
-    if inp.KeyCode == Enum.KeyCode.Slash and not GuiVisible then
-        SetVisible(true)
-    end
-
     if not SearchBox:IsFocused() and not MinInput:IsFocused() then return end
-
-    -- Arrow navigation in dropdown
-    if inp.KeyCode == Enum.KeyCode.Up then
-        if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
-            UpdateDropSelection(selectedDropIdx - 1)
-        else
-            local prev = History:Prev()
-            if prev ~= "" then SearchBox.Text = prev; MinInput.Text = prev end
-        end
-    elseif inp.KeyCode == Enum.KeyCode.Down then
-        if #dropItems > 0 and DropFrame.Size.Y.Offset > 0 then
-            UpdateDropSelection(selectedDropIdx + 1)
-        else
-            local nxt = History:Next()
-            SearchBox.Text = nxt; MinInput.Text = nxt
-        end
-    elseif inp.KeyCode == Enum.KeyCode.Escape then
-        HideDropdown()
-        SearchBox:ReleaseFocus()
-        MinInput:ReleaseFocus()
-    elseif inp.KeyCode == Enum.KeyCode.Tab then
-        -- autocomplete top result
-        if #dropItems > 0 then
-            SearchBox.Text = ":"..dropItems[selectedDropIdx].aliases[1].." "
-            SearchBox.CursorPosition = #SearchBox.Text + 1
+    if inp.KeyCode==Enum.KeyCode.Up then
+        if #dropItems>0 and DropFrame.Size.Y.Offset>0 then UpdateDropSel(selectedDropIdx-1)
+        else local p=History:Prev(); SearchBox.Text=p; MinInput.Text=p end
+    elseif inp.KeyCode==Enum.KeyCode.Down then
+        if #dropItems>0 and DropFrame.Size.Y.Offset>0 then UpdateDropSel(selectedDropIdx+1)
+        else local n=History:Next(); SearchBox.Text=n; MinInput.Text=n end
+    elseif inp.KeyCode==Enum.KeyCode.Escape then
+        HideDropdown(); SearchBox:ReleaseFocus(); MinInput:ReleaseFocus()
+    elseif inp.KeyCode==Enum.KeyCode.Tab then
+        if #dropItems>0 then
+            SearchBox.Text=":"..dropItems[selectedDropIdx].aliases[1].." "
+            SearchBox.CursorPosition=#SearchBox.Text+1
             HideDropdown()
         end
     end
 end)
 
--- MinBar input
-MinInput.FocusLost:Connect(function(enterPressed)
-    if enterPressed then
-        local text = MinInput.Text:match("^%s*(.-)%s*$")
-        if text ~= "" then
-            ExecCommand(text:sub(1,1) == ":" and text or ":"..text)
-        end
-        MinInput.Text = ""
+MinInput.FocusLost:Connect(function(enter)
+    if enter then
+        local t=MinInput.Text:match("^%s*(.-)%s*$")
+        if t~="" then ExecCommand(t:sub(1,1)==":" and t or ":"..t) end
+        MinInput.Text=""
     end
 end)
 
--- ══════════════════════════════════════════════════════════════
--- CHAT HOOK  ( :command args )
--- ══════════════════════════════════════════════════════════════
-local function OnChat(msg)
-    if msg:sub(1,1) ~= ":" then return end
-    ExecCommand(msg)
-    -- suppress the chat message visually (best-effort in executor)
-    pcall(function()
-        StarterGui:SetCore("ChatMakeSystemMessage", {
-            Text      = "[Apex] Ran: " .. msg,
-            Color     = T.Violet,
-            Font      = Enum.Font.GothamBold,
-            TextSize  = 14,
-        })
-    end)
-end
+HelpBtn.MouseButton1Click:Connect(function()
+    local d=Registry:Get("help")
+    if d then d.execute({},":help",{player=LP,notif=Notif,registry=Registry}) end
+end)
 
+-- ══════════════════════════════════════════════════════════════
+-- CHAT HOOK
+-- ══════════════════════════════════════════════════════════════
 local chatConn
 pcall(function()
-    local ChatService = game:GetService("Chat")
-    -- executor hook
-    chatConn = LP.Chatted:Connect(OnChat)
+    chatConn = LP.Chatted:Connect(function(msg)
+        if msg:sub(1,1)~=":" then return end
+        ExecCommand(msg)
+        pcall(function()
+            StarterGui:SetCore("ChatMakeSystemMessage",{
+                Text="[Apex] "..msg, Color=T.Violet,
+                Font=Enum.Font.GothamBold, TextSize=13,
+            })
+        end)
+    end)
 end)
-ENV.ApexAdmin_ChatConn = chatConn
+ENV.ApexChatConn = chatConn
 
 -- ══════════════════════════════════════════════════════════════
--- BUILT-IN COMMANDS (core set — expand in Part 2+)
+-- ══════════════════════════════════════════════════════════════
+--  400+ COMMANDS
+-- ══════════════════════════════════════════════════════════════
 -- ══════════════════════════════════════════════════════════════
 
--- :help — list all commands in notification + console
+-- ─── HELPERS (used inside commands) ──────────────────────────
+local function Chr()  return LP.Character end
+local function Hum()  return Chr() and Chr():FindFirstChildOfClass("Humanoid") end
+local function Root() return Chr() and Chr():FindFirstChild("HumanoidRootPart") end
+local function WaitChr() return LP.Character or LP.CharacterAdded:Wait() end
+
+local function AllParts(char)
+    local out={}
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then table.insert(out,p) end
+    end
+    return out
+end
+
+-- track toggles in one table
+local State = {
+    noclip      = false,
+    inf_jump    = false,
+    fly         = false,
+    speed_boost = false,
+    esp         = false,
+    fullbright  = false,
+    nofog       = false,
+    hitbox_exp  = false,
+    auto_jump   = false,
+    spin        = false,
+    rainbow     = false,
+    loop_jump   = false,
+    inf_health  = false,
+    no_fall     = false,
+    freeze_cam  = false,
+    clicktp     = false,
+    anti_aim    = false,
+    orbit       = false,
+    zoom_lock   = false,
+    seizure     = false,
+}
+
+-- ─────────────────────────────────────────────────────────────
+--  INFO / META
+-- ─────────────────────────────────────────────────────────────
 Registry:Add({
-    aliases     = {"help", "h", "?"},
-    description = "List all commands or get info on one",
-    category    = "Info",
-    args        = {{ name="command", type="string", optional=true, hint="speed" }},
-    usage       = ":help [command]",
-    execute     = function(args, raw, ctx)
+    aliases={"help","h","?"},
+    description="List commands or info on one",
+    category="Info", usage=":help [cmd]",
+    args={{name="command",type="string",optional=true,hint="speed"}},
+    execute=function(args,_,ctx)
         if args[1] then
-            local def = Registry:Get(args[1])
-            if not def then
-                Notif.Push("No command: :"..args[1], "warn")
-                return
-            end
-            Notif.Push(
-                ":"..def.aliases[1].." — "..def.description.."\nUsage: "..(def.usage or ""),
-                "info", 6
-            )
+            local d=Registry:Get(args[1])
+            if not d then Notif.Push("No cmd: :"..args[1],"warn"); return end
+            Notif.Push(":"..d.aliases[1].." — "..d.description.."\n"..(d.usage or ""),"info",6)
         else
-            local all  = Registry:All()
-            local lines = {}
-            table.sort(all, function(a,b) return a._canon < b._canon end)
-            for _, d in ipairs(all) do
-                table.insert(lines, ":"..d.aliases[1].." — "..(d.description or ""))
-            end
-            -- Print to executor console
-            for _, l in ipairs(lines) do print(l) end
-            Notif.Push(#all.." commands available. See executor console for full list.", "info", 4)
-            -- Also open panel and show all
-            SetVisible(true)
-            activeTab = "All"
-            SearchBox.Text = ""
-            BuildCommandList("")
-            BuildTabs()
+            local all=Registry:All()
+            table.sort(all,function(a,b) return a._canon<b._canon end)
+            for _,d in ipairs(all) do print(":"..d.aliases[1].." — "..(d.description or "")) end
+            Notif.Push(#all.." commands loaded. Console has full list.","info",4)
+            SetVisible(true); activeTab="All"; SearchBox.Text=""; BuildCommandList(""); BuildTabs()
         end
     end,
 })
 
--- :ping
-Registry:Add({
-    aliases     = {"ping"},
-    description = "Show current client ping",
-    category    = "Info",
-    usage       = ":ping",
-    execute     = function(args, raw, ctx)
-        local ws = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
-        local ms = ws and math.floor(ws.Value) or -1
-        Notif.Push("Ping: "..ms.." ms", ms > 150 and "warn" or "success")
+Registry:Add({aliases={"ping"},description="Show client ping",category="Info",usage=":ping",
+    execute=function()
+        local ok,v=pcall(function()
+            return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"].Value)
+        end)
+        Notif.Push("Ping: "..(ok and v or "N/A").."ms", ok and (v<150 and "success" or "warn") or "error")
     end,
 })
 
--- :fps
-Registry:Add({
-    aliases     = {"fps"},
-    description = "Show current client FPS",
-    category    = "Info",
-    usage       = ":fps",
-    execute     = function(args, raw, ctx)
-        local fps = math.floor(1/RunService.RenderStepped:Wait())
-        Notif.Push("FPS: "..fps, fps < 30 and "warn" or "success")
+Registry:Add({aliases={"fps"},description="Show client FPS",category="Info",usage=":fps",
+    execute=function()
+        local fps=math.floor(1/RunService.RenderStepped:Wait())
+        Notif.Push("FPS: "..fps, fps<30 and "warn" or "success")
     end,
 })
 
--- :speed [n]
-Registry:Add({
-    aliases     = {"speed", "spd", "ws"},
-    description = "Set your WalkSpeed",
-    category    = "Movement",
-    args        = {{ name="value", type="number", optional=false, default=16, hint="50" }},
-    usage       = ":speed 50",
-    execute     = function(args, raw, ctx)
-        local v  = tonumber(args[1]) or 16
-        local ch = LP.Character or LP.CharacterAdded:Wait()
-        local hum = ch:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.WalkSpeed = v
-            Notif.Push("WalkSpeed set to "..v, "success")
-        else
-            Notif.Push("No Humanoid found.", "error")
-        end
+Registry:Add({aliases={"players","plist","who"},description="List all players",category="Info",usage=":players",
+    execute=function()
+        local all=Players:GetPlayers()
+        for _,p in ipairs(all) do print(p.Name.." ("..p.UserId..")") end
+        Notif.Push(#all.." players. See console.","info")
     end,
 })
 
--- :jump [n]
-Registry:Add({
-    aliases     = {"jump", "jp", "jh"},
-    description = "Set your JumpPower / JumpHeight",
-    category    = "Movement",
-    args        = {{ name="value", type="number", optional=false, default=50, hint="100" }},
-    usage       = ":jump 100",
-    execute     = function(args, raw, ctx)
-        local v   = tonumber(args[1]) or 50
-        local ch  = LP.Character or LP.CharacterAdded:Wait()
-        local hum = ch:FindFirstChildOfClass("Humanoid")
-        if hum then
-            if hum.UseJumpPower then hum.JumpPower  = v
-            else                     hum.JumpHeight = v end
-            Notif.Push("JumpPower set to "..v, "success")
-        end
+Registry:Add({aliases={"history","hist"},description="Show command history",category="Info",usage=":history",
+    execute=function()
+        local log=History:GetAll()
+        if #log==0 then Notif.Push("No history.","info"); return end
+        for _,e in ipairs(log) do print(e) end
+        Notif.Push(#log.." history entries. See console.","info")
     end,
 })
 
--- :god
-Registry:Add({
-    aliases     = {"god", "godmode", "gm"},
-    description = "Toggle god mode (max health + no damage)",
-    category    = "Player",
-    usage       = ":god",
-    execute     = function(args, raw, ctx)
-        local ch  = LP.Character or LP.CharacterAdded:Wait()
-        local hum = ch:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.MaxHealth = math.huge
-            hum.Health    = math.huge
-            Notif.Push("God mode enabled.", "success")
-        end
+Registry:Add({aliases={"version","ver"},description="Show Apex Admin version",category="Info",usage=":version",
+    execute=function() Notif.Push("Apex Admin v2.0","info",3) end,
+})
+
+Registry:Add({aliases={"uid","userid","id"},description="Show your UserID",category="Info",usage=":uid",
+    execute=function() Notif.Push("UserID: "..LP.UserId,"info") end,
+})
+
+Registry:Add({aliases={"username","name","whoami"},description="Show your username",category="Info",usage=":username",
+    execute=function() Notif.Push("Username: "..LP.Name,"info") end,
+})
+
+Registry:Add({aliases={"gameid","gid"},description="Show game PlaceId",category="Info",usage=":gameid",
+    execute=function() Notif.Push("PlaceId: "..game.PlaceId,"info") end,
+})
+
+Registry:Add({aliases={"serverid","sid"},description="Show JobId",category="Info",usage=":serverid",
+    execute=function() Notif.Push("JobId: "..game.JobId,"info") end,
+})
+
+Registry:Add({aliases={"pos","position"},description="Show your current position",category="Info",usage=":pos",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local p=r.Position
+        Notif.Push(("X:%.1f Y:%.1f Z:%.1f"):format(p.X,p.Y,p.Z),"info")
     end,
 })
 
--- :noclip
+Registry:Add({aliases={"look","lookdir"},description="Show camera look direction",category="Info",usage=":look",
+    execute=function()
+        local cf=Cam.CFrame.LookVector
+        Notif.Push(("Look: %.2f %.2f %.2f"):format(cf.X,cf.Y,cf.Z),"info")
+    end,
+})
+
+Registry:Add({aliases={"health","hp"},description="Show your health",category="Info",usage=":health",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        Notif.Push(("Health: %.0f / %.0f"):format(h.Health,h.MaxHealth), h.Health<25 and "warn" or "success")
+    end,
+})
+
+Registry:Add({aliases={"playercount","pc"},description="Show player count",category="Info",usage=":playercount",
+    execute=function()
+        Notif.Push("Players: "..#Players:GetPlayers().."/"..Players.MaxPlayers,"info")
+    end,
+})
+
+Registry:Add({aliases={"time","clocktime"},description="Show game time",category="Info",usage=":time",
+    execute=function()
+        Notif.Push(("Game time: %.1f"):format(Lighting.ClockTime),"info")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  MOVEMENT
+-- ─────────────────────────────────────────────────────────────
 Registry:Add({
-    aliases     = {"noclip", "nc", "ghost"},
-    description = "Toggle noclip (fly through walls)",
-    category    = "Movement",
-    usage       = ":noclip",
-    execute     = function(args, raw, ctx)
-        local ch = LP.Character
-        if not ch then Notif.Push("No character.", "error"); return end
-        local toggling = not ch:GetAttribute("_noclip")
-        ch:SetAttribute("_noclip", toggling)
-        if toggling then
+    aliases={"speed","ws","spd","walkspeed"},
+    description="Set WalkSpeed",category="Movement",usage=":speed <value>",
+    args={{name="value",type="number",optional=false,hint="50"}},
+    execute=function(args)
+        local v=tonumber(args[1]) or 16
+        local h=Hum()
+        if h then h.WalkSpeed=v; Notif.Push("WalkSpeed → "..v,"success")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"jump","jp","jh","jumppower"},
+    description="Set JumpPower/Height",category="Movement",usage=":jump <value>",
+    args={{name="value",type="number",optional=false,hint="100"}},
+    execute=function(args)
+        local v=tonumber(args[1]) or 50
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        if h.UseJumpPower then h.JumpPower=v else h.JumpHeight=v end
+        Notif.Push("Jump → "..v,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"noclip","nc","ghost"},
+    description="Toggle noclip",category="Movement",usage=":noclip",
+    execute=function()
+        State.noclip = not State.noclip
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        if State.noclip then
             local conn
             conn = RunService.Stepped:Connect(function()
-                if not ch:GetAttribute("_noclip") then conn:Disconnect(); return end
-                for _, p in ipairs(ch:GetDescendants()) do
-                    if p:IsA("BasePart") then p.CanCollide = false end
+                if not State.noclip then conn:Disconnect(); return end
+                for _,p in ipairs(AllParts(c)) do p.CanCollide=false end
+            end)
+        else
+            for _,p in ipairs(AllParts(c)) do p.CanCollide=true end
+        end
+        Notif.Push("Noclip "..(State.noclip and "ON" or "OFF"), State.noclip and "success" or "warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"fly","flight","ng"},
+    description="Toggle fly mode",category="Movement",usage=":fly [speed]",
+    args={{name="speed",type="number",optional=true,hint="50"}},
+    execute=function(args)
+        State.fly = not State.fly
+        local c=WaitChr(); local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local spd=tonumber(args[1]) or 50
+        if State.fly then
+            local bg=Instance.new("BodyGyro")
+            bg.MaxTorque=Vector3.new(1e5,1e5,1e5); bg.D=50; bg.Name="FlyGyro"; bg.Parent=root
+            local bv=Instance.new("BodyVelocity")
+            bv.Velocity=Vector3.zero; bv.MaxForce=Vector3.new(1e5,1e5,1e5); bv.Name="FlyVel"; bv.Parent=root
+            local h=c:FindFirstChildOfClass("Humanoid")
+            if h then h.PlatformStand=true end
+            local conn
+            conn=RunService.RenderStepped:Connect(function()
+                if not State.fly then conn:Disconnect()
+                    pcall(function() bg:Destroy(); bv:Destroy() end)
+                    if h then h.PlatformStand=false end
+                    return
+                end
+                local mv=Vector3.zero
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then mv=mv+Cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then mv=mv-Cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then mv=mv-Cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then mv=mv+Cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then mv=mv+Vector3.new(0,1,0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then mv=mv-Vector3.new(0,1,0) end
+                bv.Velocity=mv*spd
+                bg.CFrame=Cam.CFrame
+            end)
+            Notif.Push("Fly ON (spd "..spd..")","success")
+        else
+            Notif.Push("Fly OFF","warn")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"infjump","ij","infinitejump"},
+    description="Toggle infinite jump",category="Movement",usage=":infjump",
+    execute=function()
+        State.inf_jump = not State.inf_jump
+        if State.inf_jump then
+            local conn
+            conn=UserInputService.JumpRequest:Connect(function()
+                if not State.inf_jump then conn:Disconnect(); return end
+                local h=Hum()
+                if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+            end)
+        end
+        Notif.Push("InfJump "..(State.inf_jump and "ON" or "OFF"), State.inf_jump and "success" or "warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"loopjump","lj"},
+    description="Continuously jump",category="Movement",usage=":loopjump",
+    execute=function()
+        State.loop_jump = not State.loop_jump
+        if State.loop_jump then
+            task.spawn(function()
+                while State.loop_jump do
+                    local h=Hum()
+                    if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+                    task.wait(0.05)
                 end
             end)
-            Notif.Push("Noclip ON", "success")
-        else
-            for _, p in ipairs(ch:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = true end
-            end
-            Notif.Push("Noclip OFF", "warn")
         end
+        Notif.Push("LoopJump "..(State.loop_jump and "ON" or "OFF"), State.loop_jump and "success" or "warn")
     end,
 })
 
--- :goto [player]
 Registry:Add({
-    aliases     = {"goto", "tp", "teleport"},
-    description = "Teleport to a player",
-    category    = "Teleport",
-    args        = {{ name="player", type="string", optional=false, hint="username" }},
-    usage       = ":goto PlayerName",
-    execute     = function(args, raw, ctx)
-        local name   = args[1]
-        local target = nil
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower():sub(1,#name) == name:lower() then
-                target = p; break
-            end
+    aliases={"spin","sp"},
+    description="Spin your character",category="Movement",usage=":spin [speed]",
+    args={{name="speed",type="number",optional=true,hint="10"}},
+    execute=function(args)
+        State.spin = not State.spin
+        local spd=tonumber(args[1]) or 10
+        if State.spin then
+            local conn
+            conn=RunService.RenderStepped:Connect(function()
+                if not State.spin then conn:Disconnect(); return end
+                local r=Root()
+                if r then r.CFrame=r.CFrame*CFrame.Angles(0,math.rad(spd),0) end
+            end)
         end
-        if not target then Notif.Push("Player not found: "..name, "error"); return end
-        local myCh  = LP.Character
-        local tgCh  = target.Character
-        if not myCh or not tgCh then Notif.Push("Character missing.", "error"); return end
-        local root  = myCh:FindFirstChild("HumanoidRootPart")
-        local tRoot = tgCh:FindFirstChild("HumanoidRootPart")
-        if root and tRoot then
-            root.CFrame = tRoot.CFrame + Vector3.new(2, 0, 0)
-            Notif.Push("Teleported to "..target.Name, "success")
-        end
+        Notif.Push("Spin "..(State.spin and "ON" or "OFF"), State.spin and "success" or "warn")
     end,
 })
 
--- :bring [player]
 Registry:Add({
-    aliases     = {"bring"},
-    description = "Bring a player to you",
-    category    = "Teleport",
-    args        = {{ name="player", type="string", optional=false, hint="username" }},
-    usage       = ":bring PlayerName",
-    execute     = function(args, raw, ctx)
-        local name   = args[1]
-        local target = nil
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower():sub(1,#name) == name:lower() then
-                target = p; break
+    aliases={"nofall","nf","nofalldmg"},
+    description="Toggle no fall damage",category="Movement",usage=":nofall",
+    execute=function()
+        State.no_fall = not State.no_fall
+        local h=Hum()
+        if h then
+            if State.no_fall then
+                h.StateChanged:Connect(function(_, new)
+                    if State.no_fall and new==Enum.HumanoidStateType.Freefall then
+                        h:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                    end
+                end)
             end
         end
-        if not target then Notif.Push("Player not found: "..name, "error"); return end
-        local myCh = LP.Character
-        local tgCh = target.Character
-        if not myCh or not tgCh then Notif.Push("Character missing.", "error"); return end
-        local myRoot = myCh:FindFirstChild("HumanoidRootPart")
-        local tgRoot = tgCh:FindFirstChild("HumanoidRootPart")
-        if myRoot and tgRoot then
-            tgRoot.CFrame = myRoot.CFrame + Vector3.new(2, 0, 0)
-            Notif.Push("Brought "..target.Name, "success")
-        end
+        Notif.Push("NoFall "..(State.no_fall and "ON" or "OFF"), State.no_fall and "success" or "warn")
     end,
 })
 
--- :invisible / :vis
 Registry:Add({
-    aliases     = {"invisible", "invis", "vis"},
-    description = "Toggle character invisibility",
-    category    = "Visual",
-    usage       = ":invisible",
-    execute     = function(args, raw, ctx)
-        local ch = LP.Character
-        if not ch then Notif.Push("No character.", "error"); return end
-        local isInvis = ch:GetAttribute("_invis")
-        ch:SetAttribute("_invis", not isInvis)
-        for _, p in ipairs(ch:GetDescendants()) do
+    aliases={"resetspeed","rws"},
+    description="Reset WalkSpeed to 16",category="Movement",usage=":resetspeed",
+    execute=function()
+        local h=Hum()
+        if h then h.WalkSpeed=16; Notif.Push("WalkSpeed reset to 16","success")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"resetjump","rjp"},
+    description="Reset JumpPower to 50",category="Movement",usage=":resetjump",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        if h.UseJumpPower then h.JumpPower=50 else h.JumpHeight=7.2 end
+        Notif.Push("Jump reset","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"hipheight","hh"},
+    description="Set hip height",category="Movement",usage=":hipheight <value>",
+    args={{name="value",type="number",optional=false,hint="0"}},
+    execute=function(args)
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.HipHeight=tonumber(args[1]) or 0
+        Notif.Push("HipHeight → "..args[1],"success")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  TELEPORT
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"goto","tp","teleport"},
+    description="Teleport to a player",category="Teleport",usage=":goto <player>",
+    args={{name="player",type="string",optional=false,hint="username"}},
+    execute=function(args)
+        local t=U.FindPlayer(args[1])
+        if not t then Notif.Push("Player not found.","error"); return end
+        local r=Root(); local tr=U.GetRoot(t)
+        if r and tr then r.CFrame=tr.CFrame+Vector3.new(2,0,0); Notif.Push("→ "..t.Name,"success")
+        else Notif.Push("Missing root.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"bring","br"},
+    description="Bring a player to you",category="Teleport",usage=":bring <player>",
+    args={{name="player",type="string",optional=false,hint="username"}},
+    execute=function(args)
+        local t=U.FindPlayer(args[1])
+        if not t then Notif.Push("Player not found.","error"); return end
+        local r=Root(); local tr=U.GetRoot(t)
+        if r and tr then tr.CFrame=r.CFrame+Vector3.new(2,0,0); Notif.Push("Brought "..t.Name,"success")
+        else Notif.Push("Missing root.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"tppos","tpxyz","tpto"},
+    description="Teleport to XYZ coords",category="Teleport",usage=":tppos <x> <y> <z>",
+    args={{name="x",type="number",optional=false},{name="y",type="number",optional=false},{name="z",type="number",optional=false}},
+    execute=function(args)
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local x=tonumber(args[1]) or 0
+        local y=tonumber(args[2]) or 0
+        local z=tonumber(args[3]) or 0
+        r.CFrame=CFrame.new(x,y,z)
+        Notif.Push(("TP → %.1f %.1f %.1f"):format(x,y,z),"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"tpback","prev"},
+    description="Teleport to previous position",category="Teleport",usage=":tpback",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local saved=r:GetAttribute("_prevPos")
+        if not saved then Notif.Push("No saved position.","warn"); return end
+        r:SetAttribute("_prevPos", r.CFrame)
+        r.CFrame=saved
+        Notif.Push("Teleported back","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"savepos","sp","markpos"},
+    description="Save current position",category="Teleport",usage=":savepos",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        r:SetAttribute("_prevPos", r.CFrame)
+        local p=r.Position
+        Notif.Push(("Saved: %.0f %.0f %.0f"):format(p.X,p.Y,p.Z),"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"loadpos","lp","recallpos"},
+    description="Recall saved position",category="Teleport",usage=":loadpos",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local s=r:GetAttribute("_prevPos")
+        if not s then Notif.Push("No saved pos.","warn"); return end
+        r.CFrame=s
+        Notif.Push("Recalled position","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"tpspawn","spawn"},
+    description="Teleport to spawn",category="Teleport",usage=":tpspawn",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local spawn=Workspace:FindFirstChildOfClass("SpawnLocation")
+        if spawn then r.CFrame=spawn.CFrame+Vector3.new(0,5,0); Notif.Push("→ Spawn","success")
+        else r.CFrame=CFrame.new(0,10,0); Notif.Push("→ Origin","warn") end
+    end,
+})
+
+Registry:Add({
+    aliases={"clicktp","ctp"},
+    description="Toggle click-to-teleport",category="Teleport",usage=":clicktp",
+    execute=function()
+        State.clicktp = not State.clicktp
+        if State.clicktp then
+            local conn
+            conn=UserInputService.InputBegan:Connect(function(inp,gpe)
+                if gpe or not State.clicktp then conn:Disconnect(); return end
+                if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+                    local r=Root()
+                    if not r then return end
+                    local ray=Cam:ViewportPointToRay(inp.Position.X,inp.Position.Y)
+                    local res=Workspace:Raycast(ray.Origin,ray.Direction*500)
+                    if res then r.CFrame=CFrame.new(res.Position+Vector3.new(0,3,0)) end
+                end
+            end)
+        end
+        Notif.Push("ClickTP "..(State.clicktp and "ON" or "OFF"), State.clicktp and "success" or "warn")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  PLAYER / CHARACTER
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"god","godmode","gm"},
+    description="Toggle god mode",category="Player",usage=":god",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.MaxHealth=math.huge; h.Health=math.huge
+        Notif.Push("God mode ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"ungod","mortal"},
+    description="Disable god mode",category="Player",usage=":ungod",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.MaxHealth=100; h.Health=100
+        Notif.Push("God mode OFF","warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"infhealth","ih","infhp"},
+    description="Toggle infinite health regen",category="Player",usage=":infhealth",
+    execute=function()
+        State.inf_health = not State.inf_health
+        if State.inf_health then
+            task.spawn(function()
+                while State.inf_health do
+                    local h=Hum()
+                    if h then h.Health=h.MaxHealth end
+                    task.wait(0.1)
+                end
+            end)
+        end
+        Notif.Push("InfHealth "..(State.inf_health and "ON" or "OFF"), State.inf_health and "success" or "warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"sethealth","sh"},
+    description="Set health to value",category="Player",usage=":sethealth <value>",
+    args={{name="value",type="number",optional=false,hint="100"}},
+    execute=function(args)
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        local v=tonumber(args[1]) or 100
+        h.MaxHealth=math.max(v,h.MaxHealth); h.Health=v
+        Notif.Push("Health → "..v,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"kill","suicide"},
+    description="Kill yourself",category="Player",usage=":kill",
+    execute=function()
+        local h=Hum()
+        if h then h.Health=0; Notif.Push("Killed.","warn")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"reset","respawn","rs"},
+    description="Reset character",category="Player",usage=":reset",
+    execute=function()
+        local h=Hum()
+        if h then h.Health=0; Notif.Push("Resetting...","info")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"sit"},
+    description="Make yourself sit",category="Player",usage=":sit",
+    execute=function()
+        local h=Hum()
+        if h then h.Sit=true; Notif.Push("Sitting.","info")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"unsit","stand"},
+    description="Stop sitting",category="Player",usage=":unsit",
+    execute=function()
+        local h=Hum()
+        if h then h.Sit=false; Notif.Push("Standing.","info")
+        else Notif.Push("No humanoid.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"platform","ps","platformstand"},
+    description="Toggle PlatformStand",category="Player",usage=":platform",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.PlatformStand=not h.PlatformStand
+        Notif.Push("PlatformStand "..(h.PlatformStand and "ON" or "OFF"),
+            h.PlatformStand and "success" or "warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"fling","launch"},
+    description="Fling yourself upward",category="Player",usage=":fling [force]",
+    args={{name="force",type="number",optional=true,hint="200"}},
+    execute=function(args)
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local f=tonumber(args[1]) or 200
+        local bv=Instance.new("BodyVelocity")
+        bv.Velocity=Vector3.new(math.random(-f,f),f,math.random(-f,f))
+        bv.MaxForce=Vector3.new(1e5,1e5,1e5)
+        bv.Parent=r
+        task.delay(0.15, function() bv:Destroy() end)
+        Notif.Push("Flinged!","success")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  CHARACTER / APPEARANCE
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"invisible","invis","vis"},
+    description="Toggle invisibility",category="Character",usage=":invisible",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local on=c:GetAttribute("_invis")
+        c:SetAttribute("_invis",not on)
+        for _,p in ipairs(c:GetDescendants()) do
             if p:IsA("BasePart") or p:IsA("Decal") then
-                p.LocalTransparencyModifier = isInvis and 0 or 1
+                p.LocalTransparencyModifier = on and 0 or 1
             end
         end
-        Notif.Push(isInvis and "Visible" or "Invisible", "info")
+        Notif.Push(on and "Visible" or "Invisible","info")
     end,
 })
 
--- :time [h]
 Registry:Add({
-    aliases     = {"time", "lighting"},
-    description = "Set game lighting time (0-24)",
-    category    = "World",
-    args        = {{ name="hour", type="number", optional=false, hint="14" }},
-    usage       = ":time 14",
-    execute     = function(args, raw, ctx)
-        local h = tonumber(args[1])
-        if not h then Notif.Push("Provide hour 0-24", "warn"); return end
-        game:GetService("Lighting").TimeOfDay = string.format("%02d:00:00", math.clamp(h,0,24))
-        Notif.Push("Time set to "..h..":00", "success")
+    aliases={"bighead","bh"},
+    description="Make your head huge",category="Character",usage=":bighead [scale]",
+    args={{name="scale",type="number",optional=true,hint="5"}},
+    execute=function(args)
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local head=c:FindFirstChild("Head")
+        if head then
+            head.Size=Vector3.new(1,1,1)*(tonumber(args[1]) or 5)
+            Notif.Push("Big head!","success")
+        end
     end,
 })
 
--- :fog [n]
 Registry:Add({
-    aliases     = {"fog", "fogend"},
-    description = "Set fog end distance",
-    category    = "World",
-    args        = {{ name="dist", type="number", optional=false, hint="1000" }},
-    usage       = ":fog 500",
-    execute     = function(args, raw, ctx)
-        local d = tonumber(args[1]) or 1000
-        game:GetService("Lighting").FogEnd = d
-        Notif.Push("Fog end: "..d, "success")
+    aliases={"normalhead","nh","resethead"},
+    description="Reset head size",category="Character",usage=":normalhead",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local head=c:FindFirstChild("Head")
+        if head then head.Size=Vector3.new(2,1,1); Notif.Push("Head reset","success") end
     end,
 })
 
--- :players
 Registry:Add({
-    aliases     = {"players", "plist", "who"},
-    description = "List all players in the server",
-    category    = "Info",
-    usage       = ":players",
-    execute     = function(args, raw, ctx)
-        local all = Players:GetPlayers()
-        local msg = "Players ("..#all.."):\n"
-        for _, p in ipairs(all) do msg = msg .. "  "..p.Name.."\n" end
-        print(msg)
-        Notif.Push(#all.." players in server. See console.", "info")
+    aliases={"scale","size"},
+    description="Scale character size",category="Character",usage=":scale <value>",
+    args={{name="value",type="number",optional=false,hint="2"}},
+    execute=function(args)
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local v=tonumber(args[1]) or 1
+        local hum=c:FindFirstChildOfClass("Humanoid")
+        if not hum then Notif.Push("No humanoid.","error"); return end
+        local desc=hum:GetAppliedDescription()
+        desc.HeadScale=v; desc.BodyDepthScale=v; desc.BodyHeightScale=v
+        desc.BodyWidthScale=v; desc.ProportionScale=v
+        hum:ApplyDescription(desc)
+        Notif.Push("Scale → "..v,"success")
     end,
 })
 
--- :reset
 Registry:Add({
-    aliases     = {"reset", "respawn"},
-    description = "Reset your character",
-    category    = "Player",
-    usage       = ":reset",
-    execute     = function(args, raw, ctx)
-        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.Health = 0 end
-        Notif.Push("Character reset.", "info")
+    aliases={"rainbow","rb","colorshift"},
+    description="Toggle rainbow character",category="Character",usage=":rainbow",
+    execute=function()
+        State.rainbow = not State.rainbow
+        if State.rainbow then
+            local hue=0
+            task.spawn(function()
+                while State.rainbow do
+                    local c=Chr()
+                    if c then
+                        local col=Color3.fromHSV(hue,1,1)
+                        for _,p in ipairs(c:GetDescendants()) do
+                            if p:IsA("BasePart") and p.Name~="HumanoidRootPart" then
+                                p.Color=col
+                            end
+                        end
+                    end
+                    hue=(hue+0.005)%1
+                    task.wait(0.05)
+                end
+            end)
+        end
+        Notif.Push("Rainbow "..(State.rainbow and "ON" or "OFF"), State.rainbow and "success" or "warn")
     end,
 })
 
--- :history
 Registry:Add({
-    aliases     = {"history", "hist"},
-    description = "Show command history",
-    category    = "Info",
-    usage       = ":history",
-    execute     = function(args, raw, ctx)
-        local log = History:GetAll()
-        if #log == 0 then Notif.Push("No history yet.", "info"); return end
-        for _, entry in ipairs(log) do print(entry) end
-        Notif.Push(#log.." entries in history. See console.", "info")
+    aliases={"color","bodycolor","col"},
+    description="Set body color",category="Character",usage=":color <r> <g> <b>",
+    args={{name="r",type="number",optional=false},{name="g",type="number",optional=false},{name="b",type="number",optional=false}},
+    execute=function(args)
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local r=math.clamp(tonumber(args[1]) or 255,0,255)
+        local g=math.clamp(tonumber(args[2]) or 255,0,255)
+        local b=math.clamp(tonumber(args[3]) or 255,0,255)
+        local col=Color3.fromRGB(r,g,b)
+        for _,p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") and p.Name~="HumanoidRootPart" then p.Color=col end
+        end
+        Notif.Push(("Color → %d %d %d"):format(r,g,b),"success")
     end,
 })
 
--- :clear
 Registry:Add({
-    aliases     = {"clear", "cls"},
-    description = "Clear the search box",
-    category    = "Utility",
-    usage       = ":clear",
-    execute     = function(args, raw, ctx)
-        SearchBox.Text = ""
-        BuildCommandList("")
+    aliases={"transparency","tr","settransparency"},
+    description="Set character transparency",category="Character",usage=":transparency <0-1>",
+    args={{name="value",type="number",optional=false,hint="0.5"}},
+    execute=function(args)
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local v=math.clamp(tonumber(args[1]) or 0,0,1)
+        for _,p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then p.Transparency=v end
+        end
+        Notif.Push("Transparency → "..v,"success")
     end,
 })
 
--- ══════════════════════════════════════════════════════════════
--- HELP BUTTON WIRING
--- ══════════════════════════════════════════════════════════════
-HelpBtn.MouseButton1Click:Connect(function()
-    Registry:Get("help").execute({}, ":help", {player=LP, notif=Notif, registry=Registry})
-end)
+Registry:Add({
+    aliases={"glow","bloom","addglow"},
+    description="Add glow to character parts",category="Character",usage=":glow",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        for _,p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") and p.Name~="HumanoidRootPart" then
+                local sl=Instance.new("SelectionBox")
+                sl.Adornee=p; sl.Color3=T.Violet; sl.LineThickness=0.02
+                sl.SurfaceColor3=T.Violet; sl.SurfaceTransparency=0.85
+                sl.Parent=p; sl.Name="GlowBox"
+            end
+        end
+        Notif.Push("Glow added","success")
+    end,
+})
 
--- ══════════════════════════════════════════════════════════════
--- INITIAL RENDER
--- ══════════════════════════════════════════════════════════════
-BuildTabs()
-BuildCommandList("")
+Registry:Add({
+    aliases={"unglow","removeglow"},
+    description="Remove glow",category="Character",usage=":unglow",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        for _,p in ipairs(c:GetDescendants()) do
+            if p.Name=="GlowBox" then p:Destroy() end
+        end
+        Notif.Push("Glow removed","warn")
+    end,
+})
 
-StatusLabel.Text    = "Apex Admin  ·  Ready  ·  F2 to toggle"
-CmdCountLabel.Text  = #Registry:All() .. " commands loaded"
+Registry:Add({
+    aliases={"forcefield","ff"},
+    description="Give yourself a forcefield",category="Character",usage=":forcefield",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        if c:FindFirstChildOfClass("ForceField") then
+            c:FindFirstChildOfClass("ForceField"):Destroy()
+            Notif.Push("ForceField OFF","warn")
+        else
+            Instance.new("ForceField").Parent=c
+            Notif.Push("ForceField ON","success")
+        end
+    end,
+})
 
--- Store global ref for part 2 to extend
-ENV.ApexAdmin     = ScreenGui
-ENV.ApexRegistry  = Registry
-ENV.ApexNotif     = Notif
-ENV.ApexTheme     = T
-ENV.ApexHistory   = History
-ENV.ApexExec      = ExecCommand
-ENV.ApexBuildList = BuildCommandList
-ENV.ApexBuildTabs = BuildTabs
+Registry:Add({
+    aliases={"nametag","nt","settag"},
+    description="Change your nametag display name",category="Character",usage=":nametag <text>",
+    args={{name="text",type="string",optional=false,hint="MyName"}},
+    execute=function(args)
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.DisplayName=args[1] or LP.Name
+        Notif.Push("Nametag → "..h.DisplayName,"success")
+    end,
+})
 
-print("[ApexAdmin v1.0] Loaded. F2 to toggle. Chat with :command to run.")
-print("[ApexAdmin] Add commands via: ENV.ApexRegistry:Add({...})")
+Registry:Add({
+    aliases={"resetnametag","rnt"},
+    description="Reset display name",category="Character",usage=":resetnametag",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.DisplayName=LP.Name
+        Notif.Push("Nametag reset","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"hidenametag","hnt","tagoff"},
+    description="Hide your nametag",category="Character",usage=":hidenametag",
+    execute=function()
+        local h=Hum()
+        if not h then Notif.Push("No humanoid.","error"); return end
+        h.DisplayName=""
+        Notif.Push("Nametag hidden","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"orbit","orb"},
+    description="Orbit around a player",category="Character",usage=":orbit <player>",
+    args={{name="player",type="string",optional=false,hint="username"}},
+    execute=function(args)
+        State.orbit = not State.orbit
+        if not State.orbit then Notif.Push("Orbit OFF","warn"); return end
+        local t=U.FindPlayer(args[1])
+        if not t then Notif.Push("Player not found.","error"); State.orbit=false; return end
+        local angle=0
+        task.spawn(function()
+            while State.orbit do
+                local tr=U.GetRoot(t); local r=Root()
+                if tr and r then
+                    angle=angle+0.05
+                    local offset=Vector3.new(math.cos(angle)*8, 0, math.sin(angle)*8)
+                    r.CFrame=CFrame.new(tr.Position+offset, tr.Position)
+                end
+                task.wait(0.03)
+            end
+        end)
+        Notif.Push("Orbiting "..t.Name,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"freeze","fr"},
+    description="Freeze/unfreeze yourself",category="Character",usage=":freeze",
+    execute=function()
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local frozen=r:GetAttribute("_frozen")
+        r:SetAttribute("_frozen",not frozen)
+        if not frozen then
+            local a=Instance.new("BodyPosition")
+            a.Position=r.Position; a.MaxForce=Vector3.new(1e8,1e8,1e8)
+            a.Name="FreezeAnchor"; a.Parent=r
+            Notif.Push("Frozen","warn")
+        else
+            local a=r:FindFirstChild("FreezeAnchor")
+            if a then a:Destroy() end
+            Notif.Push("Unfrozen","success")
+        end
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  VISUAL / ESP
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"esp","wallhack","wh"},
+    description="Toggle player ESP",category="Visual",usage=":esp",
+    execute=function()
+        State.esp = not State.esp
+        local holderName="_ApexESP"
+
+        local function removeESP()
+            local h=ScreenGui:FindFirstChild(holderName)
+            if h then h:Destroy() end
+        end
+
+        if not State.esp then removeESP(); Notif.Push("ESP OFF","warn"); return end
+
+        removeESP()
+        local holder=Instance.new("Folder"); holder.Name=holderName; holder.Parent=ScreenGui
+
+        local function makeESP(p)
+            if p==LP then return end
+            local bg=Instance.new("BillboardGui")
+            bg.Name="ESPBillboard"; bg.AlwaysOnTop=true
+            bg.Size=UDim2.new(0,120,0,40); bg.StudsOffset=Vector3.new(0,3,0)
+            bg.Parent=holder
+
+            local nl=U.Label({text=p.Name, col=T.Cyan, font=T.FontBold, sz=13,
+                size=UDim2.new(1,0,0.6,0), xa=Enum.TextXAlignment.Center, z=2, parent=bg})
+            local hl=U.Label({text="", col=T.Green, font=T.FontLight, sz=10,
+                size=UDim2.new(1,0,0.4,0), pos=UDim2.new(0,0,0.6,0),
+                xa=Enum.TextXAlignment.Center, z=2, parent=bg})
+
+            local function update()
+                if not State.esp then return end
+                local ch=p.Character
+                local h=ch and ch:FindFirstChildOfClass("Humanoid")
+                local r=ch and ch:FindFirstChild("HumanoidRootPart")
+                if r then bg.Adornee=r else bg.Adornee=nil end
+                if h then
+                    hl.Text=("♥ %.0f/%.0f"):format(h.Health,h.MaxHealth)
+                    hl.TextColor3=Color3.fromHSV((h.Health/h.MaxHealth)*0.33,1,1)
+                end
+            end
+
+            RunService.RenderStepped:Connect(function()
+                if not State.esp then return end
+                update()
+            end)
+        end
+
+        for _,p in ipairs(Players:GetPlayers()) do makeESP(p) end
+        Players.PlayerAdded:Connect(function(p)
+            if State.esp then makeESP(p) end
+        end)
+        Notif.Push("ESP ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"fullbright","fb","maxbright"},
+    description="Toggle fullbright",category="Visual",usage=":fullbright",
+    execute=function()
+        State.fullbright = not State.fullbright
+        if State.fullbright then
+            Lighting.Brightness=2; Lighting.ClockTime=14
+            Lighting.FogEnd=1e6; Lighting.GlobalShadows=false
+            Notif.Push("Fullbright ON","success")
+        else
+            Lighting.Brightness=1; Lighting.GlobalShadows=true
+            Notif.Push("Fullbright OFF","warn")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"nofog","nf2","clearfog"},
+    description="Remove fog",category="Visual",usage=":nofog",
+    execute=function()
+        Lighting.FogEnd=1e8; Lighting.FogStart=1e7
+        Notif.Push("Fog removed","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"fog","setfog"},
+    description="Set fog distance",category="Visual",usage=":fog <dist>",
+    args={{name="dist",type="number",optional=false,hint="500"}},
+    execute=function(args)
+        local d=tonumber(args[1]) or 1000
+        Lighting.FogEnd=d; Lighting.FogStart=d*0.5
+        Notif.Push("Fog → "..d,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"ambient","amb"},
+    description="Set ambient lighting color (r g b)",category="Visual",usage=":ambient <r> <g> <b>",
+    args={{name="r",type="number",optional=false},{name="g",type="number",optional=false},{name="b",type="number",optional=false}},
+    execute=function(args)
+        local r=tonumber(args[1]) or 128
+        local g=tonumber(args[2]) or 128
+        local b=tonumber(args[3]) or 128
+        Lighting.Ambient=Color3.fromRGB(r,g,b)
+        Notif.Push(("Ambient → %d %d %d"):format(r,g,b),"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"outambient","oa"},
+    description="Set outdoor ambient",category="Visual",usage=":outambient <r> <g> <b>",
+    args={{name="r",type="number",optional=false},{name="g",type="number",optional=false},{name="b",type="number",optional=false}},
+    execute=function(args)
+        local r=tonumber(args[1]) or 128
+        local g=tonumber(args[2]) or 128
+        local b=tonumber(args[3]) or 128
+        Lighting.OutdoorAmbient=Color3.fromRGB(r,g,b)
+        Notif.Push("OutdoorAmbient set","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"skybox","sky"},
+    description="Set skybox (asset ID)",category="Visual",usage=":skybox <id>",
+    args={{name="id",type="string",optional=false,hint="assetid"}},
+    execute=function(args)
+        local sky=Lighting:FindFirstChildOfClass("Sky")
+        if not sky then sky=Instance.new("Sky"); sky.Parent=Lighting end
+        local id="rbxassetid://"..(args[1] or "")
+        sky.SkyboxBk=id; sky.SkyboxDn=id; sky.SkyboxFt=id
+        sky.SkyboxLf=id; sky.SkyboxRt=id; sky.SkyboxUp=id
+        Notif.Push("Skybox → "..args[1],"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"removeskybox","nosky","clearsky"},
+    description="Remove skybox",category="Visual",usage=":removeskybox",
+    execute=function()
+        local s=Lighting:FindFirstChildOfClass("Sky")
+        if s then s:Destroy(); Notif.Push("Skybox removed","success")
+        else Notif.Push("No skybox.","warn") end
+    end,
+})
+
+Registry:Add({
+    aliases={"blur","setblur"},
+    description="Set camera blur",category="Visual",usage=":blur <size>",
+    args={{name="size",type="number",optional=false,hint="10"}},
+    execute=function(args)
+        local b=Lighting:FindFirstChildOfClass("BlurEffect")
+        if not b then b=Instance.new("BlurEffect"); b.Parent=Lighting end
+        b.Size=tonumber(args[1]) or 10
+        Notif.Push("Blur → "..args[1],"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"noblur","clearblur","rb2"},
+    description="Remove blur effect",category="Visual",usage=":noblur",
+    execute=function()
+        local b=Lighting:FindFirstChildOfClass("BlurEffect")
+        if b then b:Destroy(); Notif.Push("Blur removed","success")
+        else Notif.Push("No blur.","warn") end
+    end,
+})
+
+Registry:Add({
+    aliases={"colorcorrect","cc","colorgrade"},
+    description="Apply color correction",category="Visual",usage=":colorcorrect <brightness> <contrast> <saturation>",
+    args={{name="b",type="number",optional=false,hint="0"},{name="c",type="number",optional=false,hint="0"},{name="s",type="number",optional=false,hint="0"}},
+    execute=function(args)
+        local cc=Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+        if not cc then cc=Instance.new("ColorCorrectionEffect"); cc.Parent=Lighting end
+        cc.Brightness=tonumber(args[1]) or 0
+        cc.Contrast=tonumber(args[2]) or 0
+        cc.Saturation=tonumber(args[3]) or 0
+        Notif.Push("Color correction applied","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"nocolorcorrect","nocc","resetcolor"},
+    description="Remove color correction",category="Visual",usage=":nocolorcorrect",
+    execute=function()
+        local cc=Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+        if cc then cc:Destroy(); Notif.Push("Color correction removed","success")
+        else Notif.Push("None active.","warn") end
+    end,
+})
+
+Registry:Add({
+    aliases={"sunrays","sr"},
+    description="Add sun rays effect",category="Visual",usage=":sunrays",
+    execute=function()
+        local ex=Lighting:FindFirstChildOfClass("SunRaysEffect")
+        if ex then ex:Destroy(); Notif.Push("Sun rays OFF","warn"); return end
+        local s=Instance.new("SunRaysEffect"); s.Intensity=0.25; s.Spread=0.5; s.Parent=Lighting
+        Notif.Push("Sun rays ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"depthfield","dof"},
+    description="Toggle depth of field",category="Visual",usage=":depthfield",
+    execute=function()
+        local ex=Lighting:FindFirstChildOfClass("DepthOfFieldEffect")
+        if ex then ex:Destroy(); Notif.Push("DoF OFF","warn"); return end
+        local d=Instance.new("DepthOfFieldEffect")
+        d.FarIntensity=1; d.NearIntensity=1
+        d.InFocusRadius=10; d.FocusDistance=20
+        d.Parent=Lighting
+        Notif.Push("Depth of Field ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"hitbox","hb","expandhitbox"},
+    description="Toggle hitbox expansion",category="Visual",usage=":hitbox [size]",
+    args={{name="size",type="number",optional=true,hint="5"}},
+    execute=function(args)
+        State.hitbox_exp = not State.hitbox_exp
+        local sz=tonumber(args[1]) or 5
+        if State.hitbox_exp then
+            task.spawn(function()
+                while State.hitbox_exp do
+                    for _,p in ipairs(Players:GetPlayers()) do
+                        if p~=LP then
+                            local c=p.Character
+                            if c then
+                                local hr=c:FindFirstChild("HumanoidRootPart")
+                                if hr then hr.Size=Vector3.new(sz,sz,sz) end
+                            end
+                        end
+                    end
+                    task.wait(0.5)
+                end
+            end)
+        end
+        Notif.Push("Hitbox expand "..(State.hitbox_exp and "ON" or "OFF")..
+            (State.hitbox_exp and " (size "..sz..")" or ""),
+            State.hitbox_exp and "success" or "warn")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  CAMERA
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"camfov","fov"},
+    description="Set camera FOV",category="Camera",usage=":camfov <value>",
+    args={{name="value",type="number",optional=false,hint="70"}},
+    execute=function(args)
+        local v=math.clamp(tonumber(args[1]) or 70, 1, 120)
+        Cam.FieldOfView=v
+        Notif.Push("FOV → "..v,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"resetfov","rfov"},
+    description="Reset FOV to 70",category="Camera",usage=":resetfov",
+    execute=function()
+        Cam.FieldOfView=70
+        Notif.Push("FOV reset to 70","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"cammode","cm"},
+    description="Set camera type (custom/follow/fixed/track/watch/attach)",category="Camera",usage=":cammode <type>",
+    args={{name="type",type="string",optional=false,hint="Custom"}},
+    execute=function(args)
+        local modes={
+            custom=Enum.CameraType.Custom, follow=Enum.CameraType.Follow,
+            fixed=Enum.CameraType.Fixed,   track=Enum.CameraType.Track,
+            watch=Enum.CameraType.Watch,   attach=Enum.CameraType.Attach,
+            orbital=Enum.CameraType.Orbital, scriptable=Enum.CameraType.Scriptable,
+        }
+        local m=modes[(args[1] or ""):lower()]
+        if not m then Notif.Push("Unknown camera type.","warn"); return end
+        Cam.CameraType=m
+        Notif.Push("Camera → "..args[1],"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"camzoom","cz","zoom"},
+    description="Set camera zoom distance",category="Camera",usage=":camzoom <dist>",
+    args={{name="dist",type="number",optional=false,hint="20"}},
+    execute=function(args)
+        local d=tonumber(args[1]) or 20
+        local ok=pcall(function()
+            LP.CameraMinZoomDistance=d; LP.CameraMaxZoomDistance=d
+        end)
+        if ok then Notif.Push("Zoom → "..d,"success")
+        else Notif.Push("Zoom set failed.","error") end
+    end,
+})
+
+Registry:Add({
+    aliases={"freecam","fc"},
+    description="Toggle free camera (scriptable)",category="Camera",usage=":freecam [speed]",
+    args={{name="speed",type="number",optional=true,hint="30"}},
+    execute=function(args)
+        State.freeze_cam = not State.freeze_cam
+        local spd=tonumber(args[1]) or 30
+        if State.freeze_cam then
+            Cam.CameraType=Enum.CameraType.Scriptable
+            local cf=Cam.CFrame
+            local conn
+            conn=RunService.RenderStepped:Connect(function(dt)
+                if not State.freeze_cam then
+                    Cam.CameraType=Enum.CameraType.Custom; conn:Disconnect(); return
+                end
+                local mv=Vector3.zero
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then mv=mv+cf.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then mv=mv-cf.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then mv=mv-cf.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then mv=mv+cf.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.E) then mv=mv+Vector3.new(0,1,0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Q) then mv=mv-Vector3.new(0,1,0) end
+                cf=cf+mv*(spd*dt)
+                Cam.CFrame=cf
+            end)
+            Notif.Push("FreeCam ON (WASD+QE)","success")
+        else
+            Cam.CameraType=Enum.CameraType.Custom
+            Notif.Push("FreeCam OFF","warn")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"camlook","lookat"},
+    description="Point camera at a player",category="Camera",usage=":camlook <player>",
+    args={{name="player",type="string",optional=false,hint="username"}},
+    execute=function(args)
+        local t=U.FindPlayer(args[1])
+        if not t then Notif.Push("Player not found.","error"); return end
+        local tr=U.GetRoot(t)
+        if not tr then Notif.Push("No root.","error"); return end
+        Cam.CameraType=Enum.CameraType.Scriptable
+        Cam.CFrame=CFrame.new(Cam.CFrame.Position, tr.Position)
+        task.delay(0.05, function() Cam.CameraType=Enum.CameraType.Custom end)
+        Notif.Push("Looking at "..t.Name,"success")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  WORLD
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"settime","st","gametime"},
+    description="Set game time (0-24)",category="World",usage=":settime <hour>",
+    args={{name="hour",type="number",optional=false,hint="14"}},
+    execute=function(args)
+        local h=math.clamp(tonumber(args[1]) or 12, 0, 24)
+        Lighting.ClockTime=h
+        Notif.Push(("Time → %.1f"):format(h),"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"day","noon"},
+    description="Set time to noon",category="World",usage=":day",
+    execute=function()
+        Lighting.ClockTime=12; Notif.Push("Time → Noon","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"night","midnight"},
+    description="Set time to midnight",category="World",usage=":night",
+    execute=function()
+        Lighting.ClockTime=0; Notif.Push("Time → Night","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"sunset","dusk"},
+    description="Set time to sunset",category="World",usage=":sunset",
+    execute=function()
+        Lighting.ClockTime=18; Notif.Push("Time → Sunset","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"sunrise","dawn"},
+    description="Set time to sunrise",category="World",usage=":sunrise",
+    execute=function()
+        Lighting.ClockTime=6; Notif.Push("Time → Sunrise","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"gravity","grav","g"},
+    description="Set workspace gravity",category="World",usage=":gravity <value>",
+    args={{name="value",type="number",optional=false,hint="196.2"}},
+    execute=function(args)
+        local v=tonumber(args[1]) or 196.2
+        Workspace.Gravity=v
+        Notif.Push("Gravity → "..v,"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"zerograv","zg","nograv"},
+    description="Set gravity to zero",category="World",usage=":zerograv",
+    execute=function()
+        Workspace.Gravity=0; Notif.Push("Gravity → 0","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"resetgrav","rg"},
+    description="Reset gravity to default",category="World",usage=":resetgrav",
+    execute=function()
+        Workspace.Gravity=196.2; Notif.Push("Gravity reset","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"moongrav","mg"},
+    description="Set moon-like gravity",category="World",usage=":moongrav",
+    execute=function()
+        Workspace.Gravity=32; Notif.Push("Moon gravity","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"highgrav","hg"},
+    description="Set high gravity",category="World",usage=":highgrav",
+    execute=function()
+        Workspace.Gravity=800; Notif.Push("High gravity","warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"waterfall","wf"},
+    description="Set very high gravity",category="World",usage=":waterfall",
+    execute=function()
+        Workspace.Gravity=5000; Notif.Push("GRAVITY: EXTREME","warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"brightness","bright","lb"},
+    description="Set lighting brightness",category="World",usage=":brightness <value>",
+    args={{name="value",type="number",optional=false,hint="1"}},
+    execute=function(args)
+        Lighting.Brightness=tonumber(args[1]) or 1
+        Notif.Push("Brightness → "..args[1],"success")
+    end,
+})
+
+Registry:Add({
+    aliases={"shadows","sh2","toggleshadows"},
+    description="Toggle global shadows",category="World",usage=":shadows",
+    execute=function()
+        Lighting.GlobalShadows=not Lighting.GlobalShadows
+        Notif.Push("Shadows "..(Lighting.GlobalShadows and "ON" or "OFF"),
+            Lighting.GlobalShadows and "success" or "warn")
+    end,
+})
+
+Registry:Add({
+    aliases={"wind","setwind"},
+    description="Set wind speed",category="World",usage=":wind <speed>",
+    args={{name="speed",type="number",optional=false,hint="10"}},
+    execute=function(args)
+        local sp=tonumber(args[1]) or 10
+        local wm=Workspace:FindFirstChildOfClass("WindController")
+        if not wm then wm=Instance.new("WindController"); wm.Parent=Workspace end
+        wm.MaxSpeed=sp; wm.Speed=sp
+        Notif.Push("Wind → "..sp,"success")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  EFFECTS
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"explosion","ex","boom"},
+    description="Create explosion at your pos",category="Effects",usage=":explosion [radius]",
+    args={{name="radius",type="number",optional=true,hint="30"}},
+    execute=function(args)
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        local e=Instance.new("Explosion")
+        e.Position=r.Position
+        e.BlastRadius=tonumber(args[1]) or 30
+        e.BlastPressure=0
+        e.DestroyJointRadiusPercent=0
+        e.Parent=Workspace
+        Notif.Push("Boom!","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"fire","setfire"},
+    description="Toggle fire on your character",category="Effects",usage=":fire",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local ex=root:FindFirstChildOfClass("Fire")
+        if ex then ex:Destroy(); Notif.Push("Fire OFF","warn")
+        else
+            local f=Instance.new("Fire"); f.Size=5; f.Heat=9; f.Parent=root
+            Notif.Push("Fire ON","success")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"smoke","addsmoke"},
+    description="Toggle smoke on your character",category="Effects",usage=":smoke",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local ex=root:FindFirstChildOfClass("Smoke")
+        if ex then ex:Destroy(); Notif.Push("Smoke OFF","warn")
+        else
+            local s=Instance.new("Smoke"); s.Size=2; s.Parent=root
+            Notif.Push("Smoke ON","success")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"sparkles","sp2"},
+    description="Toggle sparkles on your character",category="Effects",usage=":sparkles",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local ex=root:FindFirstChildOfClass("Sparkles")
+        if ex then ex:Destroy(); Notif.Push("Sparkles OFF","warn")
+        else
+            local s=Instance.new("Sparkles"); s.Parent=root
+            Notif.Push("Sparkles ON","success")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"particle","pt","addparticle"},
+    description="Add particle emitter",category="Effects",usage=":particle",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local ex=root:FindFirstChild("_ApexParticle")
+        if ex then ex:Destroy(); Notif.Push("Particle OFF","warn"); return end
+        local pe=Instance.new("ParticleEmitter")
+        pe.Name="_ApexParticle"; pe.Rate=50; pe.Lifetime=NumberRange.new(0.5,1.5)
+        pe.Speed=NumberRange.new(5,15); pe.SpreadAngle=Vector2.new(180,180)
+        pe.Parent=root
+        Notif.Push("Particle ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"trails","addtrail"},
+    description="Add trail to character",category="Effects",usage=":trails",
+    execute=function()
+        local c=Chr()
+        if not c then Notif.Push("No character.","error"); return end
+        local root=c:FindFirstChild("HumanoidRootPart")
+        if not root then Notif.Push("No root.","error"); return end
+        local ex=root:FindFirstChild("_ApexTrail")
+        if ex then ex:Destroy(); Notif.Push("Trail OFF","warn"); return end
+        local a0=Instance.new("Attachment"); a0.Name="TA0"; a0.Position=Vector3.new(-1,0,0); a0.Parent=root
+        local a1=Instance.new("Attachment"); a1.Name="TA1"; a1.Position=Vector3.new(1,0,0);  a1.Parent=root
+        local tr=Instance.new("Trail")
+        tr.Name="_ApexTrail"; tr.Attachment0=a0; tr.Attachment1=a1
+        tr.Lifetime=0.5; tr.Color=ColorSequence.new(T.Violet,T.Cyan)
+        tr.Transparency=NumberSequence.new(0,1)
+        tr.Parent=root
+        Notif.Push("Trail ON","success")
+    end,
+})
+
+Registry:Add({
+    aliases={"antiblur","nomotionblur","nmb"},
+    description="Remove motion blur",category="Effects",usage=":antiblur",
+    execute=function()
+        for _,e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("BlurEffect") then e:Destroy() end
+        end
+        Notif.Push("Motion blur removed","success")
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  COMBAT / PVP
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"killaura","ka","aura"},
+    description="Toggle kill aura (damages nearby players via parts)",category="Combat",usage=":killaura [range]",
+    args={{name="range",type="number",optional=true,hint="10"}},
+    execute=function(args)
+        local key="_killaura"
+        local active=ENV[key]
+        ENV[key]=not active
+        local range=tonumber(args[1]) or 10
+        if not active then
+            task.spawn(function()
+                while ENV[key] do
+                    local r=Root()
+                    if r then
+                        for _,p in ipairs(Players:GetPlayers()) do
+                            if p~=LP then
+                                local tr=U.GetRoot(p)
+                                if tr and (tr.Position-r.Position).Magnitude<=range then
+                                    local h=U.GetHum(p)
+                                    if h then h.Health=h.Health-10 end
+                                end
+                            end
+                        end
+                    end
+                    task.wait(0.2)
+                end
+            end)
+            Notif.Push("KillAura ON (range "..range..")","success")
+        else
+            Notif.Push("KillAura OFF","warn")
+        end
+    end,
+})
+
+Registry:Add({
+    aliases={"aimbotlook","ab"},
+    description="Snap camera look to nearest player",category="Combat",usage=":aimbotlook",
+    execute=function()
+        local nearest,ndist=nil,math.huge
+        local r=Root()
+        if not r then Notif.Push("No root.","error"); return end
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p~=LP then
+                local tr=U.GetRoot(p)
+                if tr then
+                    local d=(tr.Position-r.Position).Magnitude
+                    if d<ndist then ndist=d; nearest=p end
+                end
+            end
+        end
+        if not nearest then Notif.Push("No nearby players.","warn"); return end
+        local tr=U.GetRoot(nearest)
+        if tr then
+            Cam.CameraType=Enum.CameraType.Scriptable
+            Cam.CFrame=CFrame.new(Cam.CFrame.Position, tr.Position+Vector3.new(0,2,0))
+            task.delay(0.05, function() Cam.CameraType=Enum.CameraType.Custom end)
+            Notif.Push("Locked onto "..nearest.Name,"success")
+        end
+    end,
+})
+
+-- ─────────────────────────────────────────────────────────────
+--  FUN
+-- ─────────────────────────────────────────────────────────────
+Registry:Add({
+    aliases={"dance","groove"}
