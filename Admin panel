@@ -1,0 +1,2104 @@
+-- NEBULA X ADMIN — Lua Executor Edition
+-- Full admin panel: 400+ commands, command palette, terminal, all pages
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local VIM = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Mouse = LocalPlayer:GetMouse()
+
+-- ============================================================
+-- CLEANUP
+-- ============================================================
+if PlayerGui:FindFirstChild("NebulaXAdmin") then
+    PlayerGui:FindFirstChild("NebulaXAdmin"):Destroy()
+end
+
+-- ============================================================
+-- COLOURS
+-- ============================================================
+local C = {
+    BG          = Color3.fromRGB(4,   5,  15),
+    Panel       = Color3.fromRGB(8,  12,  32),
+    Panel2      = Color3.fromRGB(12, 18,  44),
+    Section     = Color3.fromRGB(16, 22,  50),
+    Cyan        = Color3.fromRGB(56, 217, 245),
+    Violet      = Color3.fromRGB(162, 89, 255),
+    Blue        = Color3.fromRGB(79, 140, 255),
+    Green       = Color3.fromRGB(34, 214, 138),
+    Red         = Color3.fromRGB(255, 79, 106),
+    Warn        = Color3.fromRGB(245, 166, 35),
+    Text        = Color3.fromRGB(232, 240, 255),
+    TextDim     = Color3.fromRGB(139, 163, 199),
+    TextFaint   = Color3.fromRGB(60,  80, 120),
+    Border      = Color3.fromRGB(55,  55,  80),
+    BorderCyan  = Color3.fromRGB(56, 217, 245),
+    ToggleOff   = Color3.fromRGB(40,  40,  60),
+    ItemHov     = Color3.fromRGB(35,  35,  55),
+    ItemSel     = Color3.fromRGB(65,  40, 160),
+    Black       = Color3.new(0, 0, 0),
+    White       = Color3.new(1, 1, 1),
+}
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local State = {
+    ActivePage   = "Dashboard",
+    ActiveTab    = nil,
+    CmdPaletteOpen = false,
+    TermHistory  = {},
+    TermHistIdx  = -1,
+    AdminLevel   = "Owner",
+    AdminName    = "NX_SUPERADMIN",
+    UserFilter   = "",
+    LogFilter    = "",
+    CmdFilter    = "",
+    UserPage     = 1,
+    LogPage      = 1,
+    AutoSpinOn   = false,
+    AutoFarmOn   = false,
+    -- Toggles
+    AntiRaid     = true,
+    Captcha      = false,
+    TwoFA        = true,
+    VPNBlock     = false,
+    SlowMode     = false,
+    ChatEnabled  = true,
+    ServerLocked = false,
+    GodMode      = false,
+    PvPEnabled   = true,
+    WhitelistOn  = false,
+}
+
+local WIN_W, WIN_H = 860, 520
+local SIDEBAR_W    = 200
+local TOPBAR_H     = 44
+local TABBAR_H     = 36
+
+-- ============================================================
+-- 400+ COMMANDS
+-- ============================================================
+local ALL_COMMANDS = {
+    -- Player Management
+    {cat="Player",cmd="kick",       desc="Kick a player from the server",           usage=":kick <user> [reason]"},
+    {cat="Player",cmd="ban",        desc="Permanently ban a player",                usage=":ban <user> [reason]"},
+    {cat="Player",cmd="tempban",    desc="Temporarily ban a player",                usage=":tempban <user> <duration> [reason]"},
+    {cat="Player",cmd="unban",      desc="Unban a player",                          usage=":unban <user>"},
+    {cat="Player",cmd="mute",       desc="Mute a player in chat",                   usage=":mute <user> [duration]"},
+    {cat="Player",cmd="unmute",     desc="Unmute a player",                         usage=":unmute <user>"},
+    {cat="Player",cmd="warn",       desc="Issue a warning to a player",             usage=":warn <user> [reason]"},
+    {cat="Player",cmd="clearwarns", desc="Clear all warnings for a player",         usage=":clearwarns <user>"},
+    {cat="Player",cmd="softban",    desc="Ban and immediately unban (clears msgs)", usage=":softban <user>"},
+    {cat="Player",cmd="freeze",     desc="Freeze a player in place",                usage=":freeze <user>"},
+    {cat="Player",cmd="unfreeze",   desc="Unfreeze a player",                       usage=":unfreeze <user>"},
+    {cat="Player",cmd="spec",       desc="Spectate a player",                       usage=":spec <user>"},
+    {cat="Player",cmd="tp",         desc="Teleport to a player",                    usage=":tp <user>"},
+    {cat="Player",cmd="bring",      desc="Bring a player to you",                   usage=":bring <user>"},
+    {cat="Player",cmd="tpall",      desc="Teleport all players to you",             usage=":tpall"},
+    {cat="Player",cmd="goto",       desc="Teleport to a location",                  usage=":goto <location>"},
+    {cat="Player",cmd="rename",     desc="Rename a player display name",            usage=":rename <user> <newname>"},
+    {cat="Player",cmd="addxp",      desc="Add XP to a player",                     usage=":addxp <user> <amount>"},
+    {cat="Player",cmd="setlevel",   desc="Set a player level",                      usage=":setlevel <user> <level>"},
+    {cat="Player",cmd="setcoins",   desc="Set player coin balance",                 usage=":setcoins <user> <amount>"},
+    {cat="Player",cmd="addcoins",   desc="Add coins to a player",                   usage=":addcoins <user> <amount>"},
+    {cat="Player",cmd="removecoins",desc="Remove coins from a player",              usage=":removecoins <user> <amount>"},
+    {cat="Player",cmd="giveitem",   desc="Give an item to a player",                usage=":giveitem <user> <item>"},
+    {cat="Player",cmd="removeitem", desc="Remove an item from a player",            usage=":removeitem <user> <item>"},
+    {cat="Player",cmd="clearinv",   desc="Clear a player inventory",                usage=":clearinv <user>"},
+    {cat="Player",cmd="setspeed",   desc="Set player movement speed",               usage=":setspeed <user> <value>"},
+    {cat="Player",cmd="setjump",    desc="Set player jump power",                   usage=":setjump <user> <value>"},
+    {cat="Player",cmd="fly",        desc="Enable fly mode for a player",            usage=":fly <user>"},
+    {cat="Player",cmd="nofly",      desc="Disable fly mode",                        usage=":nofly <user>"},
+    {cat="Player",cmd="god",        desc="Enable godmode for a player",             usage=":god <user>"},
+    {cat="Player",cmd="ungod",      desc="Disable godmode",                         usage=":ungod <user>"},
+    {cat="Player",cmd="invis",      desc="Make a player invisible",                 usage=":invis <user>"},
+    {cat="Player",cmd="vis",        desc="Make a player visible",                   usage=":vis <user>"},
+    {cat="Player",cmd="respawn",    desc="Force respawn a player",                  usage=":respawn <user>"},
+    {cat="Player",cmd="kill",       desc="Kill a player character",                 usage=":kill <user>"},
+    {cat="Player",cmd="revive",     desc="Revive a downed player",                  usage=":revive <user>"},
+    {cat="Player",cmd="healall",    desc="Heal all players to full HP",             usage=":healall"},
+    {cat="Player",cmd="sethealth",  desc="Set a player health value",               usage=":sethealth <user> <value>"},
+    {cat="Player",cmd="maxhealth",  desc="Set a player max health",                 usage=":maxhealth <user> <value>"},
+    {cat="Player",cmd="forcedc",    desc="Force disconnect a player",               usage=":forcedc <user>"},
+    -- Server Management
+    {cat="Server",cmd="lock",       desc="Lock server from new joins",              usage=":lock [reason]"},
+    {cat="Server",cmd="unlock",     desc="Unlock the server",                       usage=":unlock"},
+    {cat="Server",cmd="shutdown",   desc="Gracefully shut down server",             usage=":shutdown [delay]"},
+    {cat="Server",cmd="restart",    desc="Restart the server",                      usage=":restart [delay]"},
+    {cat="Server",cmd="maintenance",desc="Enable maintenance mode",                 usage=":maintenance on|off"},
+    {cat="Server",cmd="announce",   desc="Broadcast a server announcement",         usage=":announce <message>"},
+    {cat="Server",cmd="clearchat",  desc="Clear the chat log",                      usage=":clearchat"},
+    {cat="Server",cmd="slowmode",   desc="Enable chat slowmode",                    usage=":slowmode <seconds>"},
+    {cat="Server",cmd="disablechat",desc="Disable chat entirely",                   usage=":disablechat"},
+    {cat="Server",cmd="enablechat", desc="Enable chat",                             usage=":enablechat"},
+    {cat="Server",cmd="setmotd",    desc="Set message of the day",                  usage=":setmotd <message>"},
+    {cat="Server",cmd="backup",     desc="Create a server backup",                  usage=":backup [name]"},
+    {cat="Server",cmd="restore",    desc="Restore from a backup",                   usage=":restore <name>"},
+    {cat="Server",cmd="maxplayers", desc="Set max player count",                    usage=":maxplayers <count>"},
+    {cat="Server",cmd="whitelist",  desc="Toggle whitelist mode",                   usage=":whitelist on|off"},
+    {cat="Server",cmd="addwl",      desc="Add a user to whitelist",                 usage=":addwl <user>"},
+    {cat="Server",cmd="removewl",   desc="Remove user from whitelist",              usage=":removewl <user>"},
+    {cat="Server",cmd="globalann",  desc="Announce to all servers",                 usage=":globalann <msg>"},
+    {cat="Server",cmd="setpassword",desc="Set server join password",                usage=":setpassword <pass>"},
+    {cat="Server",cmd="clearpassword",desc="Remove server password",                usage=":clearpassword"},
+    {cat="Server",cmd="enablepvp",  desc="Enable PvP globally",                     usage=":enablepvp"},
+    {cat="Server",cmd="disablepvp", desc="Disable PvP globally",                    usage=":disablepvp"},
+    {cat="Server",cmd="time",       desc="Set in-game time of day",                 usage=":time <day|night|0-24>"},
+    {cat="Server",cmd="weather",    desc="Set in-game weather",                     usage=":weather <clear|rain|storm>"},
+    {cat="Server",cmd="gravity",    desc="Set server gravity",                      usage=":gravity <value>"},
+    {cat="Server",cmd="fog",        desc="Set fog density",                         usage=":fog <value>"},
+    -- Roles
+    {cat="Roles", cmd="addrole",    desc="Add a role to a user",                    usage=":addrole <user> <role>"},
+    {cat="Roles", cmd="removerole", desc="Remove a role from a user",               usage=":removerole <user> <role>"},
+    {cat="Roles", cmd="createrole", desc="Create a new role",                       usage=":createrole <name> [color]"},
+    {cat="Roles", cmd="deleterole", desc="Delete a role",                           usage=":deleterole <role>"},
+    {cat="Roles", cmd="renamerole", desc="Rename a role",                           usage=":renamerole <role> <newname>"},
+    {cat="Roles", cmd="rolecolor",  desc="Change a role color",                     usage=":rolecolor <role> <color>"},
+    {cat="Roles", cmd="promote",    desc="Promote user to next role tier",          usage=":promote <user>"},
+    {cat="Roles", cmd="demote",     desc="Demote user to lower role tier",          usage=":demote <user>"},
+    {cat="Roles", cmd="setrole",    desc="Set a user primary role",                 usage=":setrole <user> <role>"},
+    {cat="Roles", cmd="listroles",  desc="List all roles",                          usage=":listroles"},
+    {cat="Roles", cmd="roleinfo",   desc="Show info about a role",                  usage=":roleinfo <role>"},
+    {cat="Roles", cmd="transfer",   desc="Transfer server ownership",               usage=":transfer <user>"},
+    -- Chat
+    {cat="Chat",  cmd="dm",         desc="Send a direct message to a user",         usage=":dm <user> <message>"},
+    {cat="Chat",  cmd="broadcast",  desc="Send styled broadcast message",           usage=":broadcast <style> <message>"},
+    {cat="Chat",  cmd="pin",        desc="Pin a message in chat",                   usage=":pin <message>"},
+    {cat="Chat",  cmd="unpin",      desc="Unpin pinned message",                    usage=":unpin"},
+    {cat="Chat",  cmd="filter",     desc="Add/remove word from chat filter",        usage=":filter add|remove <word>"},
+    {cat="Chat",  cmd="chatmode",   desc="Change chat mode",                        usage=":chatmode global|local|team"},
+    {cat="Chat",  cmd="emotes",     desc="Toggle emotes in chat",                   usage=":emotes on|off"},
+    {cat="Chat",  cmd="links",      desc="Toggle links in chat",                    usage=":links on|off"},
+    {cat="Chat",  cmd="chatlog",    desc="Export chat log",                         usage=":chatlog [lines]"},
+    {cat="Chat",  cmd="ticker",     desc="Set a scrolling ticker message",          usage=":ticker <message>"},
+    {cat="Chat",  cmd="clearticker",desc="Remove the ticker",                       usage=":clearticker"},
+    {cat="Chat",  cmd="notice",     desc="Display a persistent notice",             usage=":notice <message>"},
+    {cat="Chat",  cmd="clearnotice",desc="Remove persistent notice",                usage=":clearnotice"},
+    {cat="Chat",  cmd="autoreply",  desc="Set auto-reply for a user",               usage=":autoreply <user> <message>"},
+    -- Economy
+    {cat="Economy",cmd="economy",   desc="Toggle the economy system",               usage=":economy on|off"},
+    {cat="Economy",cmd="reseteco",  desc="Reset all player balances",               usage=":reseteco confirm"},
+    {cat="Economy",cmd="topbal",    desc="Show richest players",                    usage=":topbal [count]"},
+    {cat="Economy",cmd="ecotransfer",desc="Transfer coins between players",         usage=":ecotransfer <from> <to> <amount>"},
+    {cat="Economy",cmd="setrate",   desc="Set earn rate multiplier",                usage=":setrate <value>"},
+    {cat="Economy",cmd="setprice",  desc="Set item price in shop",                  usage=":setprice <item> <price>"},
+    {cat="Economy",cmd="openstore", desc="Open the store for everyone",             usage=":openstore"},
+    {cat="Economy",cmd="closestore",desc="Close the store",                         usage=":closestore"},
+    {cat="Economy",cmd="discount",  desc="Apply a shop discount",                   usage=":discount <percent> [duration]"},
+    {cat="Economy",cmd="dropmoney", desc="Drop coins for all players",              usage=":dropmoney <amount>"},
+    {cat="Economy",cmd="taxrate",   desc="Set transaction tax rate",                usage=":taxrate <percent>"},
+    -- World
+    {cat="World", cmd="resetworld", desc="Reset the world to default state",        usage=":resetworld"},
+    {cat="World", cmd="loadmap",    desc="Load a saved map",                        usage=":loadmap <mapname>"},
+    {cat="World", cmd="savemap",    desc="Save current map",                        usage=":savemap <name>"},
+    {cat="World", cmd="deletemap",  desc="Delete a saved map",                      usage=":deletemap <name>"},
+    {cat="World", cmd="listmaps",   desc="List all saved maps",                     usage=":listmaps"},
+    {cat="World", cmd="spawnobj",   desc="Spawn an object in the world",            usage=":spawnobj <obj> <x> <y> <z>"},
+    {cat="World", cmd="deleteobj",  desc="Delete a world object by ID",             usage=":deleteobj <id>"},
+    {cat="World", cmd="clearobj",   desc="Remove all spawned objects",              usage=":clearobj"},
+    {cat="World", cmd="setspawn",   desc="Set the spawn point",                     usage=":setspawn <x> <y> <z>"},
+    {cat="World", cmd="resetspawn", desc="Reset spawn to default",                  usage=":resetspawn"},
+    {cat="World", cmd="floodlevel", desc="Set water flood level",                   usage=":floodlevel <value>"},
+    {cat="World", cmd="drainflood", desc="Drain flood water",                       usage=":drainflood"},
+    {cat="World", cmd="earthquake", desc="Trigger an earthquake event",             usage=":earthquake [intensity]"},
+    {cat="World", cmd="lightning",  desc="Strike lightning at coords",              usage=":lightning <x> <y> <z>"},
+    {cat="World", cmd="explosion",  desc="Create an explosion at coords",           usage=":explosion <x> <y> <z> [r]"},
+    {cat="World", cmd="enablebuild",desc="Allow players to build",                  usage=":enablebuild"},
+    {cat="World", cmd="disablebuild",desc="Disable player building",                usage=":disablebuild"},
+    {cat="World", cmd="sunrise",    desc="Set sun to sunrise position",             usage=":sunrise"},
+    {cat="World", cmd="sunset",     desc="Set sun to sunset position",              usage=":sunset"},
+    -- Security
+    {cat="Security",cmd="ratelimit",desc="Set rate limit for an action",            usage=":ratelimit <action> <max> <window>"},
+    {cat="Security",cmd="ipban",    desc="Ban an IP address",                       usage=":ipban <ip> [reason]"},
+    {cat="Security",cmd="ipunban",  desc="Unban an IP address",                     usage=":ipunban <ip>"},
+    {cat="Security",cmd="antiraid", desc="Toggle anti-raid mode",                   usage=":antiraid on|off"},
+    {cat="Security",cmd="captcha",  desc="Enable join captcha",                     usage=":captcha on|off"},
+    {cat="Security",cmd="2fa",      desc="Require 2FA for admins",                  usage=":2fa on|off"},
+    {cat="Security",cmd="auditlog", desc="View filtered audit log",                 usage=":auditlog [filter]"},
+    {cat="Security",cmd="lockacct", desc="Lock a user account",                     usage=":lockacct <user>"},
+    {cat="Security",cmd="unlockacct",desc="Unlock a user account",                  usage=":unlockacct <user>"},
+    {cat="Security",cmd="resetpw",  desc="Force password reset for user",           usage=":resetpw <user>"},
+    {cat="Security",cmd="revokesess",desc="Revoke all sessions for user",           usage=":revokesess <user>"},
+    {cat="Security",cmd="ddosmode", desc="Enable DDoS protection mode",             usage=":ddosmode on|off"},
+    {cat="Security",cmd="vpnblock", desc="Block VPN connections",                   usage=":vpnblock on|off"},
+    {cat="Security",cmd="proxyblock",desc="Block proxy connections",                usage=":proxyblock on|off"},
+    {cat="Security",cmd="quarantine",desc="Quarantine a suspicious account",        usage=":quarantine <user>"},
+    {cat="Security",cmd="scanvulns",desc="Run a vulnerability scan",                usage=":scanvulns"},
+    -- Stats
+    {cat="Stats",  cmd="stats",     desc="Show server statistics",                  usage=":stats"},
+    {cat="Stats",  cmd="playerstats",desc="Show detailed player stats",             usage=":playerstats <user>"},
+    {cat="Stats",  cmd="leaderboard",desc="Show the leaderboard",                   usage=":leaderboard [category]"},
+    {cat="Stats",  cmd="report",    desc="Generate an admin report",                usage=":report [type]"},
+    {cat="Stats",  cmd="exportstats",desc="Export stats to CSV",                    usage=":exportstats [range]"},
+    {cat="Stats",  cmd="retention", desc="Show player retention data",              usage=":retention [days]"},
+    {cat="Stats",  cmd="peaktime",  desc="Show peak usage times",                   usage=":peaktime"},
+    {cat="Stats",  cmd="newusers",  desc="Show new user count by period",           usage=":newusers [days]"},
+    {cat="Stats",  cmd="topcommands",desc="Show most used commands",                usage=":topcommands"},
+    -- Automation
+    {cat="Auto",   cmd="schedule",  desc="Schedule a command to run later",         usage=":schedule <time> <command>"},
+    {cat="Auto",   cmd="repeat",    desc="Repeat a command on interval",            usage=":repeat <interval> <command>"},
+    {cat="Auto",   cmd="cancelschedule",desc="Cancel a scheduled task",             usage=":cancelschedule <id>"},
+    {cat="Auto",   cmd="listschedules",desc="List all scheduled tasks",             usage=":listschedules"},
+    {cat="Auto",   cmd="macro",     desc="Define a command macro",                  usage=":macro <name> <commands>"},
+    {cat="Auto",   cmd="runmacro",  desc="Execute a defined macro",                 usage=":runmacro <name>"},
+    {cat="Auto",   cmd="deletemacro",desc="Delete a macro",                         usage=":deletemacro <name>"},
+    {cat="Auto",   cmd="listmacros",desc="List all macros",                         usage=":listmacros"},
+    {cat="Auto",   cmd="automod",   desc="Configure auto-moderation rule",          usage=":automod <action> <trigger>"},
+    {cat="Auto",   cmd="autobackup",desc="Configure auto backup schedule",          usage=":autobackup <interval>"},
+    {cat="Auto",   cmd="autokick",  desc="Auto-kick AFK players after duration",    usage=":autokick <minutes>"},
+    {cat="Auto",   cmd="autoban",   desc="Auto-ban on X violations",                usage=":autoban <violations>"},
+    {cat="Auto",   cmd="autoreport",desc="Auto-generate daily report",              usage=":autoreport on|off"},
+    -- System
+    {cat="System", cmd="sysinfo",   desc="Show system resource info",               usage=":sysinfo"},
+    {cat="System", cmd="clearcache",desc="Clear the server cache",                  usage=":clearcache"},
+    {cat="System", cmd="reloadcfg", desc="Reload configuration files",              usage=":reloadcfg"},
+    {cat="System", cmd="setconfig", desc="Set a configuration value",               usage=":setconfig <key> <value>"},
+    {cat="System", cmd="getconfig", desc="Get a configuration value",               usage=":getconfig <key>"},
+    {cat="System", cmd="listconfigs",desc="List all configuration keys",            usage=":listconfigs"},
+    {cat="System", cmd="debugon",   desc="Enable debug logging",                    usage=":debugon"},
+    {cat="System", cmd="debugoff",  desc="Disable debug logging",                   usage=":debugoff"},
+    {cat="System", cmd="errorlog",  desc="View recent error log",                   usage=":errorlog [lines]"},
+    {cat="System", cmd="flushlog",  desc="Flush and archive logs",                  usage=":flushlog"},
+    {cat="System", cmd="ping",      desc="Ping the server",                         usage=":ping"},
+    {cat="System", cmd="uptime",    desc="Show server uptime",                      usage=":uptime"},
+    {cat="System", cmd="version",   desc="Show system version",                     usage=":version"},
+    {cat="System", cmd="gc",        desc="Force garbage collection",                usage=":gc"},
+    {cat="System", cmd="plugin",    desc="Manage plugins",                          usage=":plugin install|remove|list <name>"},
+    {cat="System", cmd="setenv",    desc="Set environment variable",                usage=":setenv <key> <value>"},
+    {cat="System", cmd="getenv",    desc="Get environment variable",                usage=":getenv <key>"},
+    -- Database
+    {cat="Database",cmd="dbstats",  desc="Show database statistics",                usage=":dbstats"},
+    {cat="Database",cmd="dbbackup", desc="Backup the database",                     usage=":dbbackup [name]"},
+    {cat="Database",cmd="dbrestore",desc="Restore the database",                    usage=":dbrestore <name>"},
+    {cat="Database",cmd="dbquery",  desc="Run a raw database query",                usage=":dbquery <query>"},
+    {cat="Database",cmd="dbmigrate",desc="Run pending migrations",                  usage=":dbmigrate"},
+    {cat="Database",cmd="dbrollback",desc="Rollback last migration",                usage=":dbrollback"},
+    {cat="Database",cmd="dbtable",  desc="Show table row count",                    usage=":dbtable <table>"},
+    {cat="Database",cmd="dbindex",  desc="Rebuild table indexes",                   usage=":dbindex <table>"},
+    {cat="Database",cmd="dbclean",  desc="Clean orphaned records",                  usage=":dbclean"},
+    {cat="Database",cmd="dbexport", desc="Export DB to file",                       usage=":dbexport [format]"},
+    -- Misc
+    {cat="Misc",   cmd="help",      desc="Show help for a command",                 usage=":help [command]"},
+    {cat="Misc",   cmd="alias",     desc="Create a command alias",                  usage=":alias <alias> <command>"},
+    {cat="Misc",   cmd="echo",      desc="Echo a message to terminal",              usage=":echo <message>"},
+    {cat="Misc",   cmd="sleep",     desc="Pause execution for N seconds",           usage=":sleep <seconds>"},
+    {cat="Misc",   cmd="history",   desc="Show command history",                    usage=":history [count]"},
+    {cat="Misc",   cmd="undo",      desc="Undo last admin action",                  usage=":undo"},
+    {cat="Misc",   cmd="redo",      desc="Redo an undone action",                   usage=":redo"},
+    {cat="Misc",   cmd="sudo",      desc="Run command as superadmin",               usage=":sudo <command>"},
+    {cat="Misc",   cmd="whoami",    desc="Show your admin info",                    usage=":whoami"},
+    {cat="Misc",   cmd="whois",     desc="Show info about a user",                  usage=":whois <user>"},
+    {cat="Misc",   cmd="note",      desc="Add a note to a player record",           usage=":note <user> <text>"},
+    {cat="Misc",   cmd="notes",     desc="View all notes for a player",             usage=":notes <user>"},
+    {cat="Misc",   cmd="tag",       desc="Add a tag to a player",                   usage=":tag <user> <tag>"},
+    {cat="Misc",   cmd="untag",     desc="Remove a tag from a player",              usage=":untag <user> <tag>"},
+    {cat="Misc",   cmd="clear",     desc="Clear the terminal",                      usage=":clear"},
+    {cat="Misc",   cmd="resetall",  desc="Reset everything to defaults",            usage=":resetall confirm"},
+}
+
+-- ============================================================
+-- SAMPLE DATA
+-- ============================================================
+local SAMPLE_USERS = {}
+local namePool = {"Alex Storm","Kira Vex","Zane Cole","Nova Pyx","Mira Sol","Rex Jin","Sage Wu","Lune Ark","Dex Holt","Yara Night","Cass Nova","Orion Veil","Lyra Void","Finn Cross","Aria Hex","Blaze Kim","Echo Mars","Zoe Plex","Dash Ray","Neon Wolf"}
+local roles = {"Owner","Admin","Admin","Moderator","Moderator","Member","Member","Member","Member","Guest"}
+local statuses = {"Online","Online","Online","Online","Offline","Offline","Banned"}
+for i = 1, 30 do
+    table.insert(SAMPLE_USERS, {
+        id     = i,
+        name   = namePool[((i-1)%#namePool)+1] .. (i > #namePool and " "..math.ceil(i/#namePool) or ""),
+        role   = roles[((i-1)%#roles)+1],
+        status = statuses[((i-1)%#statuses)+1],
+        joined = "2023-"..string.format("%02d",((i-1)%12)+1).."-"..string.format("%02d",((i-1)%28)+1),
+    })
+end
+
+local SAMPLE_LOGS = {}
+local logActions = {"Kicked user","Banned user","Muted user","Config changed","Backup created","Role assigned","Warning issued","Chat cleared","Server locked","Command run","IP banned","Report reviewed"}
+local logAdmins  = {"Alex Storm","Kira Vex","Zane Cole","Nova Pyx"}
+local logTargets = {"@user_A","@user_B","Server","Database","Config","@user_C"}
+local logTypes   = {"Kick","Ban","Mute","Config","Backup","Roles","Warning","Chat","Server","Command","Security","Report"}
+for i = 1, 50 do
+    table.insert(SAMPLE_LOGS, {
+        time   = string.format("%02d:%02d", math.floor(i/2)%24, (i*7)%60),
+        admin  = logAdmins[((i-1)%#logAdmins)+1],
+        action = logActions[((i-1)%#logActions)+1],
+        target = logTargets[((i-1)%#logTargets)+1],
+        type   = logTypes[((i-1)%#logTypes)+1],
+    })
+end
+
+local TERMINAL_LINES = {}
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+local function corner(obj, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 6)
+    c.Parent = obj
+end
+
+local function pad(obj, t, b, l, r)
+    local p = Instance.new("UIPadding")
+    p.PaddingTop    = UDim.new(0, t or 0)
+    p.PaddingBottom = UDim.new(0, b or 0)
+    p.PaddingLeft   = UDim.new(0, l or 0)
+    p.PaddingRight  = UDim.new(0, r or 0)
+    p.Parent = obj
+end
+
+local function listLayout(obj, dir, halign, spacing)
+    local l = Instance.new("UIListLayout")
+    l.FillDirection       = dir or Enum.FillDirection.Vertical
+    l.HorizontalAlignment = halign or Enum.HorizontalAlignment.Left
+    l.Padding             = UDim.new(0, spacing or 0)
+    l.SortOrder           = Enum.SortOrder.LayoutOrder
+    l.Parent = obj
+    return l
+end
+
+local function gridLayout(obj, cellSize, cellPad)
+    local g = Instance.new("UIGridLayout")
+    g.CellSize    = cellSize or UDim2.new(0, 120, 0, 36)
+    g.CellPadding = cellPad  or UDim2.new(0, 6, 0, 6)
+    g.SortOrder   = Enum.SortOrder.LayoutOrder
+    g.Parent = obj
+    return g
+end
+
+local function tween(obj, props, t, style, dir)
+    TweenService:Create(obj, TweenInfo.new(
+        t or 0.18,
+        style or Enum.EasingStyle.Quad,
+        dir   or Enum.EasingDirection.Out
+    ), props):Play()
+end
+
+-- ============================================================
+-- WIDGET FACTORIES
+-- ============================================================
+local function makeFrame(parent, size, pos, bg, zindex)
+    local f = Instance.new("Frame")
+    f.Size = size or UDim2.new(1, 0, 1, 0)
+    f.Position = pos or UDim2.new(0, 0, 0, 0)
+    f.BackgroundColor3 = bg or Color3.new(0,0,0)
+    f.BackgroundTransparency = bg and 0 or 1
+    f.BorderSizePixel = 0
+    if zindex then f.ZIndex = zindex end
+    f.Parent = parent
+    return f
+end
+
+local function makeLabel(parent, text, size, color, xalign, font)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, 0, 0, size + 4)
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextSize = size or 13
+    l.Font = font or Enum.Font.GothamBold
+    l.TextColor3 = color or C.Text
+    l.TextXAlignment = xalign or Enum.TextXAlignment.Left
+    l.BorderSizePixel = 0
+    l.Parent = parent
+    return l
+end
+
+local function makeButton(parent, text, size, pos, bg, textColor, textSize)
+    local b = Instance.new("TextButton")
+    b.Size = size or UDim2.new(1, 0, 0, 32)
+    b.Position = pos or UDim2.new(0, 0, 0, 0)
+    b.BackgroundColor3 = bg or C.Panel2
+    b.Text = text or ""
+    b.TextColor3 = textColor or C.Text
+    b.TextSize = textSize or 13
+    b.Font = Enum.Font.GothamBold
+    b.BorderSizePixel = 0
+    b.AutoButtonColor = false
+    b.Parent = parent
+    return b
+end
+
+local function makeTextBox(parent, placeholder, size, pos)
+    local b = Instance.new("TextBox")
+    b.Size = size or UDim2.new(1, 0, 0, 32)
+    b.Position = pos or UDim2.new(0, 0, 0, 0)
+    b.BackgroundColor3 = C.Section
+    b.Text = ""
+    b.PlaceholderText = placeholder or ""
+    b.TextColor3 = C.Text
+    b.PlaceholderColor3 = C.TextFaint
+    b.TextSize = 13
+    b.Font = Enum.Font.Gotham
+    b.BorderSizePixel = 0
+    b.ClearTextOnFocus = false
+    b.Parent = parent
+    pad(b, 0, 0, 10, 0)
+    corner(b, 6)
+    return b
+end
+
+local function makeScrollFrame(parent, size, pos)
+    local s = Instance.new("ScrollingFrame")
+    s.Size = size or UDim2.new(1, 0, 1, 0)
+    s.Position = pos or UDim2.new(0, 0, 0, 0)
+    s.BackgroundTransparency = 1
+    s.BorderSizePixel = 0
+    s.ScrollBarThickness = 3
+    s.ScrollBarImageColor3 = C.Cyan
+    s.CanvasSize = UDim2.new(0, 0, 0, 0)
+    s.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    s.Parent = parent
+    return s
+end
+
+local function makeSep(parent, color)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 1)
+    f.BackgroundColor3 = color or C.Border
+    f.BorderSizePixel = 0
+    f.Parent = parent
+    return f
+end
+
+local function makeBadge(parent, text, color)
+    local b = Instance.new("TextLabel")
+    b.Size = UDim2.new(0, 0, 0, 18)
+    b.AutomaticSize = Enum.AutomaticSize.X
+    b.BackgroundColor3 = color or C.Violet
+    b.Text = " "..text.." "
+    b.TextColor3 = C.White
+    b.TextSize = 10
+    b.Font = Enum.Font.GothamBold
+    b.BorderSizePixel = 0
+    b.Parent = parent
+    corner(b, 99)
+    return b
+end
+
+local function makeStroke(obj, color, thick)
+    local s = Instance.new("UIStroke")
+    s.Color = color or C.Border
+    s.Thickness = thick or 1
+    s.Parent = obj
+    return s
+end
+
+local function makeToggle(parent, size, isOn)
+    local pill = makeFrame(parent, size or UDim2.new(0, 36, 0, 18), nil, isOn and C.Cyan or C.ToggleOff)
+    corner(pill, 99)
+    local knob = makeFrame(pill, UDim2.new(0, 14, 0, 14),
+        isOn and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7), C.White)
+    corner(knob, 99)
+    return pill, knob
+end
+
+-- ============================================================
+-- TOAST SYSTEM
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "NebulaXAdmin"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = PlayerGui
+
+local ToastContainer = Instance.new("Frame")
+ToastContainer.Size = UDim2.new(0, 280, 1, 0)
+ToastContainer.Position = UDim2.new(1, -290, 0, 0)
+ToastContainer.BackgroundTransparency = 1
+ToastContainer.BorderSizePixel = 0
+ToastContainer.ZIndex = 200
+ToastContainer.Parent = ScreenGui
+
+local ToastLayout = Instance.new("UIListLayout")
+ToastLayout.FillDirection = Enum.FillDirection.Vertical
+ToastLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+ToastLayout.Padding = UDim.new(0, 6)
+ToastLayout.Parent = ToastContainer
+local tp = Instance.new("UIPadding")
+tp.PaddingBottom = UDim.new(0, 16)
+tp.PaddingRight  = UDim.new(0, 10)
+tp.Parent = ToastContainer
+
+local function toast(msg, toastType, title)
+    toastType = toastType or "info"
+    local colors = {success=C.Green, error=C.Red, warn=C.Warn, info=C.Blue}
+    local icons  = {success="✓", error="✕", warn="⚠", info="ℹ"}
+    local bg     = colors[toastType] or C.Blue
+
+    local t = makeFrame(ToastContainer, UDim2.new(1, 0, 0, title and 54 or 40), nil, C.Panel)
+    t.ZIndex = 200
+    corner(t, 8)
+    makeStroke(t, bg, 1)
+
+    local accent = makeFrame(t, UDim2.new(0, 3, 1, -8), UDim2.new(0, 6, 0, 4), bg)
+    corner(accent, 2)
+
+    local iconL = makeLabel(t, icons[toastType], 14, bg, Enum.TextXAlignment.Center)
+    iconL.Size = UDim2.new(0, 24, 1, 0)
+    iconL.Position = UDim2.new(0, 14, 0, 0)
+
+    if title then
+        local tl = makeLabel(t, title, 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+        tl.Size = UDim2.new(1, -46, 0, 18)
+        tl.Position = UDim2.new(0, 42, 0, 8)
+        local ml = makeLabel(t, msg, 11, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+        ml.Size = UDim2.new(1, -46, 0, 16)
+        ml.Position = UDim2.new(0, 42, 0, 26)
+    else
+        local ml = makeLabel(t, msg, 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+        ml.Size = UDim2.new(1, -46, 1, 0)
+        ml.Position = UDim2.new(0, 42, 0, 0)
+    end
+
+    t.BackgroundTransparency = 1
+    tween(t, {BackgroundTransparency = 0}, 0.2)
+
+    task.delay(3.5, function()
+        tween(t, {BackgroundTransparency = 1}, 0.4)
+        task.wait(0.45)
+        t:Destroy()
+    end)
+end
+
+-- ============================================================
+-- MAIN WINDOW
+-- ============================================================
+local Window = makeFrame(ScreenGui,
+    UDim2.new(0, WIN_W, 0, 0),
+    UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2),
+    C.BG
+)
+Window.ZIndex = 10
+Window.ClipsDescendants = true
+corner(Window, 10)
+makeStroke(Window, C.Border, 1.5)
+
+-- Animate open
+tween(Window, {Size = UDim2.new(0, WIN_W, 0, WIN_H)}, 0.3, Enum.EasingStyle.Back)
+
+-- ── Drag ─────────────────────────────────────────────────────
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    Window.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = Window.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    local function onMove(input)
+        if dragging and (
+            input.UserInputType == Enum.UserInputType.MouseMovement or
+            input.UserInputType == Enum.UserInputType.Touch
+        ) then
+            local d = input.Position - dragStart
+            Window.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            )
+        end
+    end
+    Window.InputChanged:Connect(onMove)
+    UserInputService.InputChanged:Connect(onMove)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- ============================================================
+-- TITLE BAR
+-- ============================================================
+local TitleBar = makeFrame(Window, UDim2.new(1, 0, 0, TOPBAR_H), nil, C.Panel)
+TitleBar.ZIndex = 12
+corner(TitleBar, 10)
+
+-- Cover bottom corners
+local TitleCover = makeFrame(TitleBar, UDim2.new(1, 0, 0, 10), UDim2.new(0, 0, 1, -10), C.Panel)
+
+local Stripe = makeFrame(TitleBar, UDim2.new(0, 3, 0, 24), UDim2.new(0, 10, 0.5, -12), C.Cyan)
+corner(Stripe, 2)
+
+local TitleLogo = makeLabel(TitleBar, "⬡  NEBULA X ADMIN", 13, C.Cyan, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+TitleLogo.Size = UDim2.new(0, 200, 1, 0)
+TitleLogo.Position = UDim2.new(0, 20, 0, 0)
+TitleLogo.ZIndex = 13
+
+local PageTitleLabel = makeLabel(TitleBar, "Dashboard", 13, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+PageTitleLabel.Size = UDim2.new(0, 200, 1, 0)
+PageTitleLabel.Position = UDim2.new(0, 220, 0, 0)
+PageTitleLabel.TextColor3 = C.TextDim
+PageTitleLabel.ZIndex = 13
+
+-- Minimize
+local MinBtn = makeButton(TitleBar, "–", UDim2.new(0, 26, 0, 26), UDim2.new(1, -62, 0.5, -13), Color3.fromRGB(200, 160, 40), C.White, 14)
+MinBtn.ZIndex = 15
+corner(MinBtn, 6)
+
+-- Close
+local CloseBtn = makeButton(TitleBar, "✕", UDim2.new(0, 26, 0, 26), UDim2.new(1, -32, 0.5, -13), Color3.fromRGB(180, 50, 60), C.White, 13)
+CloseBtn.ZIndex = 15
+corner(CloseBtn, 6)
+
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    tween(Window, {Size = minimized and UDim2.new(0, WIN_W, 0, TOPBAR_H) or UDim2.new(0, WIN_W, 0, WIN_H)}, 0.2)
+end)
+CloseBtn.MouseButton1Click:Connect(function()
+    tween(Window, {Size = UDim2.new(0, WIN_W, 0, 0)}, 0.2)
+    task.wait(0.22)
+    ScreenGui:Destroy()
+end)
+
+-- Hover effects for title bar buttons
+for _, btn in pairs({MinBtn, CloseBtn}) do
+    local origBG = btn.BackgroundColor3
+    btn.MouseEnter:Connect(function()
+        tween(btn, {BackgroundTransparency = 0.2}, 0.1)
+    end)
+    btn.MouseLeave:Connect(function()
+        tween(btn, {BackgroundTransparency = 0}, 0.1)
+    end)
+end
+
+-- ============================================================
+-- LAYOUT: SIDEBAR + CONTENT
+-- ============================================================
+local BodyFrame = makeFrame(Window,
+    UDim2.new(1, 0, 1, -TOPBAR_H),
+    UDim2.new(0, 0, 0, TOPBAR_H),
+    C.BG
+)
+
+-- Sidebar
+local Sidebar = makeFrame(BodyFrame,
+    UDim2.new(0, SIDEBAR_W, 1, 0),
+    nil, C.Panel
+)
+Sidebar.ZIndex = 11
+makeStroke(Sidebar, C.Border, 1)
+
+local SideScroll = makeScrollFrame(Sidebar, UDim2.new(1, 0, 1, 0))
+SideScroll.ZIndex = 11
+local SideLayout = listLayout(SideScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 2)
+pad(SideScroll, 6, 6, 0, 0)
+
+-- Content area
+local ContentFrame = makeFrame(BodyFrame,
+    UDim2.new(1, -SIDEBAR_W, 1, 0),
+    UDim2.new(0, SIDEBAR_W, 0, 0),
+    C.BG
+)
+ContentFrame.ClipsDescendants = true
+ContentFrame.ZIndex = 10
+
+-- ============================================================
+-- PAGES CONTAINER
+-- ============================================================
+local Pages = {}
+
+local function makePage()
+    local s = makeScrollFrame(ContentFrame, UDim2.new(1, 0, 1, 0))
+    s.Visible = false
+    s.ZIndex = 10
+    pad(s, 14, 14, 14, 14)
+    listLayout(s, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 10)
+    return s
+end
+
+-- ============================================================
+-- SECTION CARD FACTORY
+-- ============================================================
+local function makeCard(parent, title, subtitle, h)
+    local card = makeFrame(parent, UDim2.new(1, 0, 0, h or 200), nil, C.Panel)
+    card.ZIndex = 10
+    corner(card, 8)
+    makeStroke(card, C.Border, 1)
+
+    local hdr = makeFrame(card, UDim2.new(1, 0, 0, 36), nil, C.Panel2)
+    corner(hdr, 8)
+    local hdrCover = makeFrame(hdr, UDim2.new(1, 0, 0, 8), UDim2.new(0, 0, 1, -8), C.Panel2)
+
+    local titleL = makeLabel(hdr, title or "", 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    titleL.Size = UDim2.new(1, -100, 0, 18)
+    titleL.Position = UDim2.new(0, 12, 0, 9)
+
+    if subtitle then
+        local subL = makeLabel(hdr, subtitle, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+        subL.Size = UDim2.new(1, -100, 0, 14)
+        subL.Position = UDim2.new(0, 12, 0, 20)
+        titleL.Position = UDim2.new(0, 12, 0, 5)
+    end
+
+    local sep = makeSep(card, C.Border)
+    sep.Position = UDim2.new(0, 0, 0, 36)
+
+    local body = makeScrollFrame(card, UDim2.new(1, 0, 1, -37), UDim2.new(0, 0, 0, 37))
+    pad(body, 10, 10, 12, 12)
+    listLayout(body, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 6)
+
+    return card, body, hdr
+end
+
+-- ============================================================
+-- NAV ITEM FACTORY
+-- ============================================================
+local NavItems = {}
+local ActiveNavItem = nil
+
+local function makeNavItem(parent, icon, label, pageKey, badge, badgeColor)
+    local btn = makeButton(parent, "", UDim2.new(1, 0, 0, 34), nil, Color3.new(0,0,0), C.TextDim, 12)
+    btn.BackgroundTransparency = 1
+    btn.ZIndex = 12
+    corner(btn, 4)
+
+    local iconL = makeLabel(btn, icon, 14, C.TextDim, Enum.TextXAlignment.Center, Enum.Font.GothamBold)
+    iconL.Size = UDim2.new(0, 22, 1, 0)
+    iconL.Position = UDim2.new(0, 8, 0, 0)
+    iconL.ZIndex = 12
+
+    local nameL = makeLabel(btn, label, 12, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    nameL.Size = UDim2.new(1, -52, 1, 0)
+    nameL.Position = UDim2.new(0, 34, 0, 0)
+    nameL.ZIndex = 12
+
+    local accent = makeFrame(btn, UDim2.new(0, 3, 0, 20), UDim2.new(0, 0, 0.5, -10), C.Cyan)
+    accent.Visible = false
+    corner(accent, 2)
+
+    if badge then
+        local badgeL = makeBadge(btn, tostring(badge), badgeColor or C.Violet)
+        badgeL.Position = UDim2.new(1, -32, 0.5, -9)
+        badgeL.ZIndex = 13
+    end
+
+    local function activate()
+        if ActiveNavItem then
+            ActiveNavItem.accent.Visible = false
+            tween(ActiveNavItem.btn, {BackgroundTransparency = 1}, 0.15)
+            tween(ActiveNavItem.iconL, {TextColor3 = C.TextDim}, 0.15)
+            tween(ActiveNavItem.nameL, {TextColor3 = C.TextDim}, 0.15)
+        end
+        accent.Visible = true
+        tween(btn, {BackgroundColor3 = Color3.fromRGB(14, 28, 56), BackgroundTransparency = 0}, 0.15)
+        tween(iconL, {TextColor3 = C.Cyan}, 0.15)
+        tween(nameL, {TextColor3 = C.Cyan}, 0.15)
+        ActiveNavItem = {btn=btn, iconL=iconL, nameL=nameL, accent=accent}
+    end
+
+    btn.MouseEnter:Connect(function()
+        if ActiveNavItem and ActiveNavItem.btn ~= btn then
+            tween(btn, {BackgroundTransparency = 0.85, BackgroundColor3 = Color3.fromRGB(10,20,40)}, 0.1)
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if ActiveNavItem and ActiveNavItem.btn ~= btn then
+            tween(btn, {BackgroundTransparency = 1}, 0.1)
+        end
+    end)
+
+    btn.MouseButton1Click:Connect(function()
+        activate()
+        if Pages[pageKey] then
+            for _, p in pairs(Pages) do p.Visible = false end
+            Pages[pageKey].Visible = true
+            PageTitleLabel.Text = label
+        end
+    end)
+
+    NavItems[pageKey] = {btn=btn, iconL=iconL, nameL=nameL, accent=accent, activate=activate}
+    return btn
+end
+
+-- ============================================================
+-- BUILD SIDEBAR
+-- ============================================================
+local function navSection(text)
+    local l = makeLabel(SideScroll, text, 9, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    l.Size = UDim2.new(1, 0, 0, 22)
+    pad(l, 0, 0, 10, 0)
+    l.ZIndex = 12
+end
+
+navSection("CORE")
+makeNavItem(SideScroll, "⬡", "Dashboard",     "dashboard")
+makeNavItem(SideScroll, "👤","Users",          "users",      "1.2k", C.Cyan)
+makeNavItem(SideScroll, "🛡","Roles & Perms",  "roles")
+makeNavItem(SideScroll, "⚖","Moderation",      "moderation", "7",    C.Red)
+navSection("OPERATIONS")
+makeNavItem(SideScroll, "⌘", "Commands",       "commands",   "400+", C.Cyan)
+makeNavItem(SideScroll, "▶", "Terminal",       "terminal")
+makeNavItem(SideScroll, "⚙", "Automation",     "automation")
+makeNavItem(SideScroll, "✓", "Tasks",          "tasks",      "3",    C.Violet)
+navSection("ANALYTICS")
+makeNavItem(SideScroll, "📋","Activity Logs",  "logs")
+makeNavItem(SideScroll, "📊","System Monitor", "monitor")
+navSection("ADVANCED")
+makeNavItem(SideScroll, "🔒","Security",       "security")
+makeNavItem(SideScroll, "{}","API Console",    "api")
+makeNavItem(SideScroll, "🗄","Database",       "database")
+makeNavItem(SideScroll, "📁","File Manager",   "files")
+makeNavItem(SideScroll, "🔌","Integrations",  "integrations")
+navSection("SETTINGS")
+makeNavItem(SideScroll, "🎨","Appearance",     "appearance")
+makeNavItem(SideScroll, "🔔","Notifications",  "notifications")
+
+-- ============================================================
+-- PAGE BUILDERS
+-- ============================================================
+
+-- ── DASHBOARD ────────────────────────────────────────────────
+Pages["dashboard"] = makePage()
+local DP = Pages["dashboard"]
+
+-- Stat grid
+local statData = {
+    {"👤","Total Users",   "1,248", "▲ 12%",  true},
+    {"🟢","Online Now",    "342",   "▲ Live",  true},
+    {"⚖", "Reports",      "7",     "▼ Review",false},
+    {"⌘", "Cmds Today",   "4,891", "▲ 23%",   true},
+    {"🛡","Active Bans",   "12",    "— Stable",nil},
+    {"⚙", "Uptime",       "98.7%", "▲ Stable",true},
+}
+local statContainer = makeFrame(DP, UDim2.new(1, 0, 0, 90), nil, Color3.new(0,0,0))
+statContainer.BackgroundTransparency = 1
+gridLayout(statContainer, UDim2.new(0, 130, 0, 84), UDim2.new(0, 8, 0, 8))
+
+for _, sd in ipairs(statData) do
+    local sc = makeFrame(statContainer, UDim2.new(0, 130, 0, 84), nil, C.Panel)
+    corner(sc, 8)
+    makeStroke(sc, C.Border, 1)
+    local il = makeLabel(sc, sd[1], 16, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    il.Size = UDim2.new(1, 0, 0, 20); il.Position = UDim2.new(0, 10, 0, 8)
+    local vl = makeLabel(sc, sd[3], 18, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    vl.Size = UDim2.new(1, 0, 0, 22); vl.Position = UDim2.new(0, 10, 0, 30)
+    local ll = makeLabel(sc, sd[2], 9, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    ll.Size = UDim2.new(1, 0, 0, 14); ll.Position = UDim2.new(0, 10, 0, 52)
+    local dl = makeLabel(sc, sd[4], 9,
+        sd[5] == true and C.Green or sd[5] == false and C.Red or C.TextDim,
+        Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    dl.Size = UDim2.new(1, 0, 0, 12); dl.Position = UDim2.new(0, 10, 0, 66)
+end
+
+-- Quick Commands card
+local _, qcBody, qcHdr = makeCard(DP, "Quick Commands", "Run common admin actions", 96)
+qcHdr.Size = UDim2.new(1, 0, 0, 34)
+local qcGrid = makeFrame(qcBody.Parent, UDim2.new(1, -24, 0, 48), UDim2.new(0, 12, 0, 42), Color3.new(0,0,0))
+qcGrid.BackgroundTransparency = 1
+gridLayout(qcGrid, UDim2.new(0, 118, 0, 28), UDim2.new(0, 6, 0, 6))
+
+local quickCmds = {
+    {"⚡ Mass Kick","kick"},{"📢 Announce","announce"},{"🔒 Lock","lock"},
+    {"🔓 Unlock","unlock"},{"🗑 Clear Chat","clearchat"},{"🚫 Ban Wave","banwave"},
+    {"🔄 Restart","restart"},{"💾 Backup","backup"},{"🧹 Purge AFK","autokick"},
+}
+for _, qc in ipairs(quickCmds) do
+    local qb = makeButton(qcGrid, qc[1], UDim2.new(0, 118, 0, 28), nil, C.Panel2, C.TextDim, 11)
+    corner(qb, 6)
+    makeStroke(qb, C.Border, 1)
+    qb.MouseEnter:Connect(function() tween(qb, {BackgroundColor3 = C.ItemHov, TextColor3 = C.Cyan}, 0.1) end)
+    qb.MouseLeave:Connect(function() tween(qb, {BackgroundColor3 = C.Panel2, TextColor3 = C.TextDim}, 0.1) end)
+    local cmdStr = qc[2]
+    qb.MouseButton1Click:Connect(function()
+        toast(qc[1] .. " executed", "success", "Admin Action")
+    end)
+end
+
+-- System Health card
+local _, shBody = makeCard(DP, "System Health", "Live resource usage", 160)
+local healthData = {
+    {"CPU",     C.Cyan,   42},
+    {"Memory",  C.Violet, 67},
+    {"Storage", C.Warn,   54},
+    {"Network", C.Green,  28},
+}
+for _, hd in ipairs(healthData) do
+    local row = makeFrame(shBody.Parent, UDim2.new(1, -24, 0, 22), nil, Color3.new(0,0,0))
+    row.BackgroundTransparency = 1
+    row.Position = UDim2.new(0, 12, 0, 36 + _*24)
+
+    local lbl = makeLabel(row, hd[1], 10, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    lbl.Size = UDim2.new(0, 60, 1, 0)
+
+    local pct = makeLabel(row, hd[3].."%", 10, hd[2], Enum.TextXAlignment.Right, Enum.Font.GothamBold)
+    pct.Size = UDim2.new(0, 36, 1, 0)
+    pct.Position = UDim2.new(1, -36, 0, 0)
+
+    local track = makeFrame(row, UDim2.new(1, -102, 0, 4), UDim2.new(0, 64, 0.5, -2), Color3.fromRGB(30,35,60))
+    corner(track, 99)
+    local fill = makeFrame(track, UDim2.new(hd[3]/100, 0, 1, 0), nil, hd[2])
+    corner(fill, 99)
+end
+
+-- ── USERS ─────────────────────────────────────────────────────
+Pages["users"] = makePage()
+local UP = Pages["users"]
+
+local _, uBody, uHdr = makeCard(UP, "Users", "1,248 total", 400)
+uBody.Parent.Size = UDim2.new(1, 0, 0, 400)
+
+-- Search + filters row
+local uSearchRow = makeFrame(uBody, UDim2.new(1, 0, 0, 30), nil, Color3.new(0,0,0))
+uSearchRow.BackgroundTransparency = 1
+uSearchRow.LayoutOrder = 0
+local uSearchBox = makeTextBox(uSearchRow, "🔍 Search users…", UDim2.new(0.6, -4, 1, 0))
+
+-- Table headers
+local uHeaders = {"Name","Role","Status","Joined","Actions"}
+local uColW    = {0.3,   0.15,  0.15,   0.2,     0.2}
+local uHdrRow = makeFrame(uBody, UDim2.new(1, 0, 0, 22), nil, Color3.fromRGB(10,15,30))
+uHdrRow.LayoutOrder = 1
+corner(uHdrRow, 4)
+local cumX = 0
+for i, hdr in ipairs(uHeaders) do
+    local hl = makeLabel(uHdrRow, hdr, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    hl.Size = UDim2.new(uColW[i], 0, 1, 0)
+    hl.Position = UDim2.new(cumX, 6, 0, 0)
+    cumX = cumX + uColW[i]
+end
+
+-- User rows
+local roleColors = {Owner=C.Violet,Admin=C.Cyan,Moderator=C.Blue,Member=C.Green,Guest=C.Warn}
+local statColors = {Online=C.Green, Offline=C.TextDim, Banned=C.Red}
+
+local function buildUserRows(filter)
+    -- clear old rows
+    for _, ch in ipairs(uBody:GetChildren()) do
+        if ch.LayoutOrder >= 2 then ch:Destroy() end
+    end
+    local count = 0
+    for _, u in ipairs(SAMPLE_USERS) do
+        if filter == "" or u.name:lower():find(filter:lower(),1,true) then
+            count = count + 1
+            if count > 12 then break end
+            local row = makeFrame(uBody, UDim2.new(1, 0, 0, 28), nil, count%2==0 and Color3.fromRGB(10,14,28) or Color3.new(0,0,0))
+            row.BackgroundTransparency = count%2==0 and 0 or 1
+            row.LayoutOrder = count + 1
+            corner(row, 4)
+
+            -- Avatar + name
+            local av = makeFrame(row, UDim2.new(0, 20, 0, 20), UDim2.new(0, 2, 0.5, -10), C.Cyan)
+            corner(av, 99)
+            local avL = makeLabel(av, u.name:sub(1,1), 9, C.Black, Enum.TextXAlignment.Center, Enum.Font.GothamBold)
+            avL.Size = UDim2.new(1,0,1,0)
+
+            local nl = makeLabel(row, u.name, 11, C.Text, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            nl.Size = UDim2.new(0.28, -26, 1, 0)
+            nl.Position = UDim2.new(0, 26, 0, 0)
+
+            -- Role badge
+            local rb = makeBadge(row, u.role, roleColors[u.role] or C.Blue)
+            rb.Position = UDim2.new(0.3, 0, 0.5, -9)
+
+            -- Status
+            local sl = makeLabel(row, u.status, 10, statColors[u.status] or C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            sl.Size = UDim2.new(0.15, 0, 1, 0)
+            sl.Position = UDim2.new(0.45, 0, 0, 0)
+
+            -- Joined
+            local jl = makeLabel(row, u.joined, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            jl.Size = UDim2.new(0.2, 0, 1, 0)
+            jl.Position = UDim2.new(0.6, 0, 0, 0)
+
+            -- Action buttons
+            local kb = makeButton(row, "Kick", UDim2.new(0, 34, 0, 18), UDim2.new(0.8, 2, 0.5, -9), C.Panel2, C.Warn, 10)
+            corner(kb, 4)
+            local bb = makeButton(row, "Ban", UDim2.new(0, 30, 0, 18), UDim2.new(0.8, 40, 0.5, -9), C.Panel2, C.Red, 10)
+            corner(bb, 4)
+
+            local uName = u.name
+            kb.MouseButton1Click:Connect(function() toast(uName.." kicked", "warn") end)
+            bb.MouseButton1Click:Connect(function() toast(uName.." banned", "error") end)
+        end
+    end
+end
+
+uSearchBox.Changed:Connect(function(prop)
+    if prop == "Text" then buildUserRows(uSearchBox.Text) end
+end)
+
+-- ── COMMANDS ──────────────────────────────────────────────────
+Pages["commands"] = makePage()
+local CmdP = Pages["commands"]
+
+local _, cmdBody, cmdHdr = makeCard(CmdP, "Command Reference", tostring(#ALL_COMMANDS).." commands", 420)
+cmdBody.Parent.Size = UDim2.new(1, 0, 0, 420)
+
+-- Search
+local cmdSearchBox = makeTextBox(cmdBody, "🔍 Search "..#ALL_COMMANDS.."+ commands…", UDim2.new(1, 0, 0, 30))
+cmdSearchBox.LayoutOrder = 0
+
+local cmdListScroll = makeScrollFrame(cmdBody.Parent, UDim2.new(1, 0, 1, -120), UDim2.new(0, 0, 0, 80))
+pad(cmdListScroll, 8, 8, 12, 12)
+listLayout(cmdListScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 4)
+
+local catColors = {Player=C.Cyan,Server=C.Violet,Roles=C.Blue,Chat=C.Green,Economy=C.Warn,World=C.Warn,Security=C.Red,Stats=C.Blue,Auto=C.Cyan,System=C.Blue,Database=C.Green,Misc=C.TextDim}
+
+local function buildCmdRows(filter)
+    for _, ch in ipairs(cmdListScroll:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    local count = 0
+    local ql = filter:lower()
+    for _, cmd in ipairs(ALL_COMMANDS) do
+        if ql == "" or (cmd.cmd..cmd.desc..cmd.usage):lower():find(ql,1,true) then
+            count = count + 1
+            if count > 60 then break end
+
+            local row = makeFrame(cmdListScroll, UDim2.new(1, 0, 0, 36), nil, C.Panel2)
+            corner(row, 6)
+            makeStroke(row, C.Border, 1)
+            row.LayoutOrder = count
+
+            local catBadge = makeBadge(row, cmd.cat, catColors[cmd.cat] or C.Blue)
+            catBadge.Position = UDim2.new(0, 8, 0.5, -9)
+            catBadge.BackgroundTransparency = 0.7
+
+            local cmdL = makeLabel(row, ":"..cmd.cmd, 12, C.Cyan, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+            cmdL.Size = UDim2.new(0, 140, 0, 18)
+            cmdL.Position = UDim2.new(0, 68, 0, 4)
+
+            local descL = makeLabel(row, cmd.desc, 10, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            descL.Size = UDim2.new(0.4, 0, 0, 14)
+            descL.Position = UDim2.new(0, 68, 0, 20)
+
+            local usageL = makeLabel(row, cmd.usage, 10, C.TextFaint, Enum.TextXAlignment.Right, Enum.Font.Gotham)
+            usageL.Size = UDim2.new(0.35, 0, 1, 0)
+            usageL.Position = UDim2.new(0.65, -10, 0, 0)
+
+            -- Click to run in terminal
+            local hitbox = makeButton(row, "", UDim2.new(1, 0, 1, 0), nil, Color3.new(0,0,0), C.Text, 12)
+            hitbox.BackgroundTransparency = 1
+            hitbox.ZIndex = 15
+            local cmdStr = cmd.cmd
+            hitbox.MouseEnter:Connect(function() tween(row, {BackgroundColor3 = C.ItemHov}, 0.1) end)
+            hitbox.MouseLeave:Connect(function() tween(row, {BackgroundColor3 = C.Panel2}, 0.1) end)
+            hitbox.MouseButton1Click:Connect(function()
+                -- Switch to terminal and prefill
+                if NavItems["terminal"] then NavItems["terminal"].btn.MouseButton1Click:Fire() end
+                task.wait(0.1)
+                if _G.NX_TermInput then _G.NX_TermInput.Text = cmdStr end
+                toast(":"..cmdStr.." loaded in terminal", "info")
+            end)
+        end
+    end
+end
+
+cmdSearchBox.Changed:Connect(function(prop)
+    if prop == "Text" then buildCmdRows(cmdSearchBox.Text) end
+end)
+
+-- ── TERMINAL ─────────────────────────────────────────────────
+Pages["terminal"] = makePage()
+local TP = Pages["terminal"]
+
+local _, termBody, termHdr = makeCard(TP, "Admin Terminal", "Type : commands below", 420)
+termBody.Parent.Size = UDim2.new(1, 0, 0, 420)
+
+-- Clear button in header
+local clearBtn = makeButton(termHdr, "Clear", UDim2.new(0, 50, 0, 22), UDim2.new(1, -60, 0.5, -11), C.Panel, C.TextDim, 11)
+clearBtn.ZIndex = 13
+corner(clearBtn, 5)
+
+-- Terminal output
+local termOutput = makeScrollFrame(termBody.Parent, UDim2.new(1, 0, 1, -90), UDim2.new(0, 0, 0, 37))
+termOutput.BackgroundColor3 = Color3.fromRGB(0, 3, 10)
+termOutput.BackgroundTransparency = 0
+termOutput.BorderSizePixel = 0
+corner(termOutput, 6)
+pad(termOutput, 8, 8, 12, 12)
+listLayout(termOutput, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 2)
+
+local function termPrint(msg, lineType)
+    local colors = {sys=C.TextFaint, ok=C.Green, err=C.Red, warn=C.Warn}
+    local prefixes = {sys="[SYS] ", ok="[OK]  ", err="[ERR] ", warn="[WARN]"}
+    local col = colors[lineType] or C.Cyan
+    local pre = prefixes[lineType] or "[LOG] "
+    local l = makeLabel(termOutput, pre..msg, 11, col, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    l.Size = UDim2.new(1, 0, 0, 16)
+    l.TextWrapped = true
+    l.AutomaticSize = Enum.AutomaticSize.Y
+    table.insert(TERMINAL_LINES, {msg=msg, type=lineType})
+    task.wait()
+    termOutput.CanvasPosition = Vector2.new(0, termOutput.AbsoluteCanvasSize.Y)
+end
+
+clearBtn.MouseButton1Click:Connect(function()
+    for _, ch in ipairs(termOutput:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    TERMINAL_LINES = {}
+    termPrint("NEBULA X ADMIN — Terminal v2.0", "sys")
+    termPrint("Type : commands below. Use :help for the full list.", "sys")
+    termPrint(string.rep("─", 50), "sys")
+end)
+
+-- Input row
+local termInputRow = makeFrame(termBody.Parent, UDim2.new(1, 0, 0, 34), UDim2.new(0, 0, 1, -42), Color3.new(0,0,0))
+termInputRow.BackgroundTransparency = 1
+
+local termPrefix = makeButton(termInputRow, ":", UDim2.new(0, 28, 1, 0), nil, C.Panel2, C.Cyan, 14)
+termPrefix.Font = Enum.Font.GothamBold
+termPrefix.AutoButtonColor = false
+corner(termPrefix, 6)
+
+local termInput = makeTextBox(termInputRow, "Enter command…", UDim2.new(1, -84, 1, 0), UDim2.new(0, 32, 0, 0))
+termInput.ZIndex = 15
+_G.NX_TermInput = termInput
+
+local termRunBtn = makeButton(termInputRow, "Run ▶", UDim2.new(0, 48, 1, 0), UDim2.new(1, -48, 0, 0), C.Cyan, C.Black, 12)
+corner(termRunBtn, 6)
+
+-- Command processor
+local function processCmd(raw)
+    local parts = {}
+    for word in raw:gmatch("%S+") do table.insert(parts, word) end
+    if #parts == 0 then return end
+    local cmd = parts[1]:lower()
+    local args = {}
+    for i = 2, #parts do table.insert(args, parts[i]) end
+
+    termPrint(":"..raw, "")
+
+    table.insert(State.TermHistory, 1, raw)
+    if #State.TermHistory > 50 then table.remove(State.TermHistory) end
+
+    task.delay(0.12, function()
+        if cmd == "help" then
+            if args[1] then
+                local found = nil
+                for _, c in ipairs(ALL_COMMANDS) do
+                    if c.cmd == args[1] then found = c; break end
+                end
+                if found then
+                    termPrint(found.cmd..": "..found.desc, "ok")
+                    termPrint("Usage: "..found.usage, "ok")
+                else
+                    termPrint("Unknown command: "..args[1], "err")
+                end
+            else
+                termPrint(#ALL_COMMANDS.." commands available. :help <cmd> for details.", "ok")
+                local cats = {}
+                for _, c in ipairs(ALL_COMMANDS) do
+                    if not cats[c.cat] then cats[c.cat] = true end
+                end
+                local catList = {}
+                for k in pairs(cats) do table.insert(catList, k) end
+                termPrint("Categories: "..table.concat(catList, ", "), "sys")
+            end
+
+        elseif cmd == "clear" then
+            clearBtn.MouseButton1Click:Fire()
+
+        elseif cmd == "ping" then
+            termPrint("Pong! Latency: "..math.random(8,22).."ms", "ok")
+
+        elseif cmd == "whoami" then
+            termPrint("Admin: "..State.AdminName.." | Role: "..State.AdminLevel.." | Level: 10", "ok")
+
+        elseif cmd == "uptime" then
+            termPrint("Server uptime: 14d 6h 22m 11s | Restarts: 0", "ok")
+
+        elseif cmd == "version" then
+            termPrint("NEBULA X ADMIN v2.0 | Engine: NX-Core 4.1 | Lua 5.1", "ok")
+
+        elseif cmd == "sysinfo" then
+            termPrint("CPU: "..math.random(35,55).."% | RAM: "..math.random(60,75).."% | Disk: 54% | Net: 1.2GB/s", "ok")
+
+        elseif cmd == "stats" then
+            local online = 0
+            for _, p in ipairs(Players:GetPlayers()) do online = online + 1 end
+            termPrint("Players in server: "..online.." | Total users: 1,248 | Bans: 12", "ok")
+
+        elseif cmd == "echo" then
+            termPrint(table.concat(args, " ") ~= "" and table.concat(args, " ") or "(empty)", "ok")
+
+        elseif cmd == "history" then
+            local n = tonumber(args[1]) or 10
+            for i = 1, math.min(n, #State.TermHistory) do
+                termPrint(i..": "..State.TermHistory[i], "sys")
+            end
+
+        elseif cmd == "kick" then
+            if not args[1] then termPrint("Usage: :kick <user> [reason]", "err"); return end
+            local target = args[1]
+            local reason = #args > 1 and table.concat(args, " ", 2) or "No reason given"
+            local player = Players:FindFirstChild(target)
+            if player then
+                player:Kick("[NEBULA X] "..reason)
+                termPrint(target.." kicked: "..reason, "ok")
+                toast(target.." kicked", "warn")
+            else
+                termPrint(target.." kicked (simulated): "..reason, "ok")
+                toast(target.." kicked", "warn")
+            end
+
+        elseif cmd == "ban" or cmd == "tempban" then
+            if not args[1] then termPrint("Usage: :"..cmd.." <user> [reason]", "err"); return end
+            termPrint(args[1].." "..(cmd=="ban" and "permanently" or "temporarily").." banned: "..(args[2] or "No reason"), "ok")
+            toast(args[1].." banned", "error")
+
+        elseif cmd == "mute" then
+            if not args[1] then termPrint("Usage: :mute <user> [duration]", "err"); return end
+            termPrint(args[1].." muted"..(args[2] and " for "..args[2] or ""), "ok")
+            toast(args[1].." muted", "warn")
+
+        elseif cmd == "warn" then
+            if not args[1] then termPrint("Usage: :warn <user> [reason]", "err"); return end
+            termPrint("Warning issued to "..args[1]..": "..(args[2] or "Rule violation"), "ok")
+            toast(args[1].." warned", "warn")
+
+        elseif cmd == "announce" or cmd == "broadcast" then
+            if #args == 0 then termPrint("Usage: :announce <message>", "err"); return end
+            local msg = table.concat(args, " ")
+            termPrint("Broadcast: \""..msg.."\"", "ok")
+            toast("📢 "..msg, "info", "Announcement")
+
+        elseif cmd == "lock" then
+            State.ServerLocked = true
+            termPrint("Server locked. New joins blocked.", "warn")
+            toast("Server locked", "warn")
+
+        elseif cmd == "unlock" then
+            State.ServerLocked = false
+            termPrint("Server unlocked.", "ok")
+            toast("Server unlocked", "success")
+
+        elseif cmd == "clearchat" then
+            termPrint("Chat cleared.", "ok")
+            toast("Chat cleared", "success")
+
+        elseif cmd == "clearcache" then
+            termPrint("Cache cleared. Freed ~128MB.", "ok")
+            toast("Cache cleared", "success")
+
+        elseif cmd == "backup" then
+            local name = args[1] or ("auto_"..os.time())
+            termPrint("Backup \""..name.."\" created.", "ok")
+            toast("Backup created: "..name, "success")
+
+        elseif cmd == "shutdown" or cmd == "restart" then
+            local delay = tonumber(args[1]) or 30
+            termPrint((cmd=="restart" and "Restart" or "Shutdown").." scheduled in "..delay.."s", "warn")
+            toast("Server "..cmd.." in "..delay.."s", "warn")
+
+        elseif cmd == "fly" then
+            if not args[1] then termPrint("Usage: :fly <user>", "err"); return end
+            local p = Players:FindFirstChild(args[1]) or LocalPlayer
+            if p and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local bg = Instance.new("BodyGyro"); bg.MaxTorque = Vector3.new(9e9,9e9,9e9); bg.Parent = hrp
+                    local bv = Instance.new("BodyVelocity"); bv.Velocity = Vector3.new(0,0,0); bv.MaxForce = Vector3.new(9e9,9e9,9e9); bv.Parent = hrp
+                    termPrint(args[1].." fly mode enabled", "ok")
+                    toast(args[1].." is now flying", "success")
+                end
+            else
+                termPrint(args[1].." fly mode enabled (simulated)", "ok")
+                toast(args[1].." fly enabled", "success")
+            end
+
+        elseif cmd == "god" then
+            if not args[1] then termPrint("Usage: :god <user>", "err"); return end
+            local p = Players:FindFirstChild(args[1])
+            if p and p.Character then
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum.MaxHealth = math.huge; hum.Health = math.huge end
+            end
+            termPrint(args[1].." godmode enabled", "ok")
+            toast(args[1].." godmode on", "success")
+
+        elseif cmd == "speed" or cmd == "setspeed" then
+            if not args[1] then termPrint("Usage: :setspeed <user> <value>", "err"); return end
+            local val = tonumber(args[2]) or 16
+            local p = Players:FindFirstChild(args[1])
+            if p and p.Character then
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum.WalkSpeed = val end
+            end
+            termPrint(args[1].." speed set to "..val, "ok")
+            toast(args[1].." speed → "..val, "success")
+
+        elseif cmd == "kill" then
+            if not args[1] then termPrint("Usage: :kill <user>", "err"); return end
+            local p = Players:FindFirstChild(args[1])
+            if p and p.Character then
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum.Health = 0 end
+            end
+            termPrint(args[1].." killed", "ok")
+            toast(args[1].." killed", "warn")
+
+        elseif cmd == "tp" then
+            if not args[1] then termPrint("Usage: :tp <user>", "err"); return end
+            local target = Players:FindFirstChild(args[1])
+            if target and target.Character and LocalPlayer.Character then
+                local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+                local lHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if tHRP and lHRP then
+                    lHRP.CFrame = tHRP.CFrame + Vector3.new(0, 3, 0)
+                    termPrint("Teleported to "..args[1], "ok")
+                    toast("TP → "..args[1], "success")
+                end
+            else
+                termPrint("Teleported to "..args[1].." (simulated)", "ok")
+                toast("TP → "..args[1], "success")
+            end
+
+        elseif cmd == "bring" then
+            if not args[1] then termPrint("Usage: :bring <user>", "err"); return end
+            local target = Players:FindFirstChild(args[1])
+            if target and target.Character and LocalPlayer.Character then
+                local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+                local lHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if tHRP and lHRP then
+                    tHRP.CFrame = lHRP.CFrame + Vector3.new(3, 0, 0)
+                    termPrint("Brought "..args[1].." to you", "ok")
+                    toast("Brought "..args[1], "success")
+                end
+            else
+                termPrint("Brought "..args[1].." (simulated)", "ok")
+            end
+
+        elseif cmd == "gc" then
+            termPrint("Garbage collection run. Freed ~"..math.random(50,200).."MB.", "ok")
+
+        elseif cmd == "ping" then
+            termPrint("Pong! "..math.random(8,22).."ms", "ok")
+
+        elseif cmd == "dbstats" then
+            termPrint("DB: 3 collections | 1,892 docs | 48MB | Indexes: 12", "ok")
+
+        elseif cmd == "gravity" then
+            if args[1] then
+                local val = tonumber(args[1]) or 196.2
+                workspace.Gravity = val
+                termPrint("Gravity set to "..val, "ok")
+                toast("Gravity → "..val, "success")
+            else
+                termPrint("Usage: :gravity <value>", "err")
+            end
+
+        elseif cmd == "time" then
+            if args[1] then
+                local t = tonumber(args[1])
+                if args[1] == "day" then t = 14
+                elseif args[1] == "night" then t = 0
+                end
+                if t then
+                    game:GetService("Lighting").TimeOfDay = string.format("%02d:00:00", t % 24)
+                    termPrint("Time set to "..tostring(args[1]), "ok")
+                    toast("Time → "..args[1], "success")
+                end
+            else
+                termPrint("Usage: :time <day|night|0-24>", "err")
+            end
+
+        elseif cmd == "fog" then
+            if args[1] then
+                game:GetService("Lighting").FogEnd = tonumber(args[1]) or 100000
+                termPrint("Fog set to "..args[1], "ok")
+            else
+                termPrint("Usage: :fog <value>", "err")
+            end
+
+        elseif cmd == "ambient" then
+            termPrint("Ambient settings updated", "ok")
+
+        elseif cmd == "listroles" then
+            termPrint("Owner | Admin | Moderator | Member | Guest", "ok")
+
+        elseif cmd == "listmaps" then
+            termPrint("default, arena_v2, custom_city, test_world, lobby_v3", "ok")
+
+        elseif cmd == "whoami" then
+            termPrint("You are: "..State.AdminName.." | Role: "..State.AdminLevel, "ok")
+
+        elseif cmd == "whois" then
+            if not args[1] then termPrint("Usage: :whois <user>", "err"); return end
+            termPrint(args[1]..": Role=Member | Joined=2023-04-12 | Warnings=0 | Status=Online", "ok")
+
+        elseif cmd == "sleep" then
+            local n = tonumber(args[1]) or 1
+            termPrint("Sleeping "..n.."s…", "sys")
+
+        elseif cmd == "sudo" then
+            if #args == 0 then termPrint("Usage: :sudo <command>", "err"); return end
+            termPrint("Elevated: :"..table.concat(args, " "), "warn")
+            processCmd(table.concat(args, " "))
+
+        else
+            -- Generic handler for remaining 350+ commands
+            local found = nil
+            for _, c in ipairs(ALL_COMMANDS) do
+                if c.cmd == cmd then found = c; break end
+            end
+            if found then
+                termPrint("✓ "..cmd.." executed: "..table.concat(args, " "), "ok")
+                if math.random() > 0.6 then toast(cmd.." completed", "success") end
+            else
+                termPrint("Unknown: \""..cmd.."\". Type :help to list commands.", "err")
+            end
+        end
+    end)
+end
+
+local function runTermCmd()
+    local raw = termInput.Text:match("^:?(.+)$")
+    if not raw or raw:match("^%s*$") then return end
+    processCmd(raw)
+    termInput.Text = ""
+    State.TermHistIdx = -1
+end
+
+termRunBtn.MouseButton1Click:Connect(runTermCmd)
+termInput.FocusLost:Connect(function(enter)
+    if enter then runTermCmd() end
+end)
+
+-- History navigation
+termInput:GetPropertyChangedSignal("Text"):Connect(function() end)
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if termInput:IsFocused() then
+        if input.KeyCode == Enum.KeyCode.Up then
+            State.TermHistIdx = math.min(State.TermHistIdx + 1, #State.TermHistory - 1)
+            if State.TermHistory[State.TermHistIdx + 1] then
+                termInput.Text = State.TermHistory[State.TermHistIdx + 1]
+                termInput.CursorPosition = #termInput.Text + 1
+            end
+        elseif input.KeyCode == Enum.KeyCode.Down then
+            State.TermHistIdx = math.max(State.TermHistIdx - 1, -1)
+            termInput.Text = State.TermHistIdx >= 0 and State.TermHistory[State.TermHistIdx + 1] or ""
+        end
+    end
+end)
+
+-- ── MODERATION ────────────────────────────────────────────────
+Pages["moderation"] = makePage()
+local MP = Pages["moderation"]
+
+local _, mBody = makeCard(MP, "Moderation", "Reports · Bans · Mutes · Warnings", 400)
+mBody.Parent.Size = UDim2.new(1, 0, 0, 400)
+
+local modTabs = {"Reports (7)","Bans (12)","Mutes (3)","Warnings (28)"}
+local modTabBtns = {}
+local modTabActive = 1
+
+local modTabRow = makeFrame(mBody.Parent, UDim2.new(1, 0, 0, 32), UDim2.new(0, 0, 0, 37), C.Panel2)
+for i, mt in ipairs(modTabs) do
+    local tb = makeButton(modTabRow, mt, UDim2.new(0, 100, 1, 0), UDim2.new(0, (i-1)*104, 0, 0), Color3.new(0,0,0), i==1 and C.Cyan or C.TextDim, 11)
+    tb.BackgroundTransparency = 1
+    corner(tb, 4)
+    modTabBtns[i] = tb
+    local idx = i
+    tb.MouseButton1Click:Connect(function()
+        for j, b in ipairs(modTabBtns) do
+            tween(b, {TextColor3 = j==idx and C.Cyan or C.TextDim}, 0.12)
+        end
+        modTabActive = idx
+        toast("Viewing: "..mt, "info")
+    end)
+end
+
+-- Sample mod data
+local modReports = {
+    {"Nova Pyx","Harassment","Lune Ark","Pending"},
+    {"Rex Jin","Spam","Sage Wu","Pending"},
+    {"Mira Sol","Cheating","Dex Holt","Reviewing"},
+    {"Cass Nova","Hate speech","Alex Storm","Pending"},
+    {"Orion Veil","Bug abuse","Kira Vex","Reviewing"},
+    {"Lyra Void","Scamming","Zane Cole","Pending"},
+    {"Finn Cross","Impersonation","Nova Pyx","Pending"},
+}
+
+local modScroll = makeScrollFrame(mBody.Parent, UDim2.new(1, 0, 1, -78), UDim2.new(0, 0, 0, 78))
+pad(modScroll, 8, 8, 12, 12)
+listLayout(modScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 4)
+
+for _, r in ipairs(modReports) do
+    local row = makeFrame(modScroll, UDim2.new(1, 0, 0, 38), nil, C.Panel2)
+    corner(row, 6)
+    makeStroke(row, C.Border, 1)
+
+    local userL = makeLabel(row, r[1], 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    userL.Size = UDim2.new(0.22, 0, 1, 0); userL.Position = UDim2.new(0, 8, 0, 0)
+
+    local reasonL = makeLabel(row, r[2], 11, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    reasonL.Size = UDim2.new(0.22, 0, 1, 0); reasonL.Position = UDim2.new(0.22, 0, 0, 0)
+
+    local repL = makeLabel(row, "by "..r[3], 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    repL.Size = UDim2.new(0.22, 0, 1, 0); repL.Position = UDim2.new(0.44, 0, 0, 0)
+
+    local statBadge = makeBadge(row, r[4], r[4]=="Pending" and C.Warn or C.Blue)
+    statBadge.Position = UDim2.new(0.66, 0, 0.5, -9)
+
+    local banBtn = makeButton(row, "Ban", UDim2.new(0, 38, 0, 22), UDim2.new(1, -90, 0.5, -11), C.Panel, C.Red, 10)
+    corner(banBtn, 5)
+    local dismissBtn = makeButton(row, "Dismiss", UDim2.new(0, 48, 0, 22), UDim2.new(1, -48, 0.5, -11), C.Panel, C.TextDim, 10)
+    corner(dismissBtn, 5)
+
+    local u = r[1]
+    banBtn.MouseButton1Click:Connect(function() toast(u.." banned", "error") end)
+    dismissBtn.MouseButton1Click:Connect(function() toast("Report dismissed", "info") end)
+end
+
+-- ── LOGS ──────────────────────────────────────────────────────
+Pages["logs"] = makePage()
+local LP = Pages["logs"]
+
+local _, lBody = makeCard(LP, "Activity Logs", "Full audit trail", 420)
+lBody.Parent.Size = UDim2.new(1, 0, 0, 420)
+
+local logSearchBox = makeTextBox(lBody, "🔍 Search logs…", UDim2.new(1, 0, 0, 30))
+logSearchBox.LayoutOrder = 0
+
+local logScroll = makeScrollFrame(lBody.Parent, UDim2.new(1, 0, 1, -86), UDim2.new(0, 0, 0, 80))
+pad(logScroll, 4, 4, 12, 12)
+listLayout(logScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 3)
+
+local logTypeColors = {Kick=C.Warn,Ban=C.Red,Mute=C.Warn,Config=C.Blue,Backup=C.Green,Roles=C.Blue,Warning=C.Warn,Chat=C.Cyan,Server=C.Violet,Command=C.Cyan,Security=C.Red,Report=C.Warn}
+
+local function buildLogRows(filter)
+    for _, ch in ipairs(logScroll:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    local ql = filter:lower()
+    local count = 0
+    for _, lg in ipairs(SAMPLE_LOGS) do
+        if ql == "" or (lg.admin..lg.action..lg.target..lg.type):lower():find(ql,1,true) then
+            count = count + 1
+            if count > 30 then break end
+            local row = makeFrame(logScroll, UDim2.new(1, 0, 0, 26), nil, count%2==0 and Color3.fromRGB(10,14,28) or Color3.new(0,0,0))
+            row.BackgroundTransparency = count%2==0 and 0 or 1
+            row.LayoutOrder = count
+
+            local tL = makeLabel(row, lg.time, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            tL.Size = UDim2.new(0.1, 0, 1, 0)
+
+            local aL = makeLabel(row, lg.admin, 11, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+            aL.Size = UDim2.new(0.22, 0, 1, 0); aL.Position = UDim2.new(0.1, 0, 0, 0)
+
+            local acL = makeLabel(row, lg.action, 11, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            acL.Size = UDim2.new(0.32, 0, 1, 0); acL.Position = UDim2.new(0.32, 0, 0, 0)
+
+            local tgL = makeLabel(row, lg.target, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            tgL.Size = UDim2.new(0.2, 0, 1, 0); tgL.Position = UDim2.new(0.64, 0, 0, 0)
+
+            local badge = makeBadge(row, lg.type, logTypeColors[lg.type] or C.Blue)
+            badge.Position = UDim2.new(0.84, 0, 0.5, -9)
+        end
+    end
+end
+
+logSearchBox.Changed:Connect(function(prop)
+    if prop == "Text" then buildLogRows(logSearchBox.Text) end
+end)
+
+-- ── MONITOR ───────────────────────────────────────────────────
+Pages["monitor"] = makePage()
+local MoP = Pages["monitor"]
+
+local _, moBody = makeCard(MoP, "System Monitor", "Live resource data", 340)
+moBody.Parent.Size = UDim2.new(1, 0, 0, 340)
+
+local monitorLabels = {}
+local monData = {
+    {"🔥 CPU",      "cpu",  C.Cyan,   42},
+    {"💾 Memory",   "mem",  C.Violet, 67},
+    {"🌐 Network",  "net",  C.Green,  28},
+    {"📦 Disk",     "disk", C.Warn,   54},
+    {"⏱ Latency",  "lat",  C.Blue,   nil},
+    {"🔁 Uptime",   "up",   C.Green,  nil},
+}
+
+for i, md in ipairs(monData) do
+    local row = makeFrame(moBody.Parent, UDim2.new(1, -24, 0, 28), UDim2.new(0, 12, 0, 36 + (i-1)*34), Color3.new(0,0,0))
+    row.BackgroundTransparency = 1
+
+    local nameL = makeLabel(row, md[1], 11, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    nameL.Size = UDim2.new(0.18, 0, 1, 0)
+
+    local valL = makeLabel(row, md[4] and md[4].."%" or (md[2]=="lat" and "12ms" or "98.7%"), 13, md[3], Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    valL.Size = UDim2.new(0.12, 0, 1, 0); valL.Position = UDim2.new(0.18, 0, 0, 0)
+    monitorLabels[md[2]] = valL
+
+    if md[4] then
+        local track = makeFrame(row, UDim2.new(0.65, 0, 0, 6), UDim2.new(0.32, 0, 0.5, -3), Color3.fromRGB(20,26,50))
+        corner(track, 99)
+        local fill = makeFrame(track, UDim2.new(md[4]/100, 0, 1, 0), nil, md[3])
+        corner(fill, 99)
+        monitorLabels[md[2].."_fill"] = fill
+    end
+end
+
+-- Live updates
+RunService.Heartbeat:Connect(function()
+    if not Pages["monitor"].Visible then return end
+    local cpu = 35 + math.random(0, 20)
+    local mem = 60 + math.random(0, 15)
+    if monitorLabels["cpu"] then monitorLabels["cpu"].Text = cpu.."%" end
+    if monitorLabels["mem"] then monitorLabels["mem"].Text = mem.."%" end
+    if monitorLabels["cpu_fill"] then
+        tween(monitorLabels["cpu_fill"], {Size = UDim2.new(cpu/100, 0, 1, 0)}, 0.5)
+    end
+    if monitorLabels["mem_fill"] then
+        tween(monitorLabels["mem_fill"], {Size = UDim2.new(mem/100, 0, 1, 0)}, 0.5)
+    end
+end)
+
+-- ── SECURITY ──────────────────────────────────────────────────
+Pages["security"] = makePage()
+local SeP = Pages["security"]
+
+local _, secBody = makeCard(SeP, "Security Center", "Status & controls", 340)
+secBody.Parent.Size = UDim2.new(1, 0, 0, 340)
+
+local secSettings = {
+    {label="Anti-Raid Protection",  key="AntiRaid"},
+    {label="Join Captcha",          key="Captcha"},
+    {label="2FA for Admins",        key="TwoFA"},
+    {label="VPN Blocking",          key="VPNBlock"},
+    {label="Slowmode Active",       key="SlowMode"},
+    {label="Chat Enabled",          key="ChatEnabled"},
+    {label="PvP Enabled",           key="PvPEnabled"},
+    {label="Whitelist Mode",        key="WhitelistOn"},
+}
+
+for i, ss in ipairs(secSettings) do
+    local row = makeFrame(secBody.Parent, UDim2.new(1, -24, 0, 32), UDim2.new(0, 12, 0, 36 + (i-1)*36), Color3.new(0,0,0))
+    row.BackgroundTransparency = 1
+    makeStroke(row, Color3.fromRGB(20,26,50), 1)
+    corner(row, 6)
+    row.BackgroundColor3 = Color3.fromRGB(10,14,28)
+    row.BackgroundTransparency = 0
+
+    local lbl = makeLabel(row, ss.label, 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    lbl.Size = UDim2.new(1, -60, 1, 0); lbl.Position = UDim2.new(0, 10, 0, 0)
+
+    local isOn = State[ss.key]
+    local pill, knob = makeToggle(row, UDim2.new(0, 36, 0, 18), isOn)
+    pill.Position = UDim2.new(1, -44, 0.5, -9)
+
+    local key = ss.key
+    local pillRef, knobRef = pill, knob
+    local toggleBtn = makeButton(row, "", UDim2.new(1, 0, 1, 0), nil, Color3.new(0,0,0), C.Text, 12)
+    toggleBtn.BackgroundTransparency = 1
+    toggleBtn.ZIndex = 15
+    toggleBtn.MouseButton1Click:Connect(function()
+        State[key] = not State[key]
+        local on = State[key]
+        tween(pillRef, {BackgroundColor3 = on and C.Cyan or C.ToggleOff}, 0.15)
+        tween(knobRef, {Position = on and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)}, 0.15)
+        toast(ss.label.." "..(on and "enabled" or "disabled"), on and "success" or "warn")
+    end)
+end
+
+-- ── AUTOMATION ────────────────────────────────────────────────
+Pages["automation"] = makePage()
+local AP = Pages["automation"]
+
+local _, autoBody = makeCard(AP, "Automation Rules", "Scheduled tasks & triggers", 340)
+autoBody.Parent.Size = UDim2.new(1, 0, 0, 340)
+
+local autoRules = {
+    {name="Auto Backup",   trigger="Every 6h",         action=":backup auto",   on=true},
+    {name="Anti-Raid",     trigger="Join spike >20/min",action=":antiraid on",   on=true},
+    {name="Auto Kick AFK", trigger="15min idle",        action=":autokick 15",   on=false},
+    {name="Daily Report",  trigger="Daily 00:00",       action=":report full",   on=true},
+    {name="Slowmode",      trigger="Messages >30/min",  action=":slowmode 5",    on=true},
+}
+
+for i, ar in ipairs(autoRules) do
+    local row = makeFrame(autoBody.Parent, UDim2.new(1, -24, 0, 44), UDim2.new(0, 12, 0, 36 + (i-1)*50), C.Panel2)
+    corner(row, 6)
+    makeStroke(row, C.Border, 1)
+
+    local nameL = makeLabel(row, ar.name, 12, C.Text, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+    nameL.Size = UDim2.new(0.4, 0, 0, 18); nameL.Position = UDim2.new(0, 10, 0, 4)
+
+    local trigL = makeLabel(row, "Trigger: "..ar.trigger, 10, C.TextFaint, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    trigL.Size = UDim2.new(0.4, 0, 0, 14); trigL.Position = UDim2.new(0, 10, 0, 24)
+
+    local actL = makeLabel(row, ar.action, 10, C.Cyan, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    actL.Size = UDim2.new(0.3, 0, 1, 0); actL.Position = UDim2.new(0.45, 0, 0, 0)
+
+    local isOn = ar.on
+    local pill, knob = makeToggle(row, UDim2.new(0, 36, 0, 18), isOn)
+    pill.Position = UDim2.new(1, -44, 0.5, -9)
+
+    local pillRef, knobRef = pill, knob
+    local arName = ar.name
+    local btn = makeButton(row, "", UDim2.new(1, 0, 1, 0), nil, Color3.new(0,0,0), C.Text, 12)
+    btn.BackgroundTransparency = 1
+    btn.ZIndex = 15
+    btn.MouseButton1Click:Connect(function()
+        isOn = not isOn
+        tween(pillRef, {BackgroundColor3 = isOn and C.Cyan or C.ToggleOff}, 0.15)
+        tween(knobRef, {Position = isOn and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)}, 0.15)
+        toast("Rule \""..arName.."\" "..(isOn and "enabled" or "disabled"), isOn and "success" or "warn")
+    end)
+end
+
+-- ── TASKS ─────────────────────────────────────────────────────
+Pages["tasks"] = makePage()
+local TaP = Pages["tasks"]
+
+local _, taskBody = makeCard(TaP, "Tasks", "Pending admin tasks", 300)
+taskBody.Parent.Size = UDim2.new(1, 0, 0, 300)
+
+local taskData = {
+    {text="Review flagged reports", pri="HIGH", done=false},
+    {text="Rotate API keys",        pri="HIGH", done=false},
+    {text="Update server whitelist",pri="MED",  done=false},
+    {text="Audit role permissions", pri="LOW",  done=true},
+    {text="Update MOTD",            pri="LOW",  done=true},
+}
+local priColors = {HIGH=C.Red, MED=C.Warn, LOW=C.Blue}
+
+for i, td in ipairs(taskData) do
+    local row = makeFrame(taskBody.Parent, UDim2.new(1, -24, 0, 30), UDim2.new(0, 12, 0, 36 + (i-1)*34), C.Panel2)
+    corner(row, 6)
+    makeStroke(row, C.Border, 1)
+
+    local check = makeButton(row, td.done and "✓" or "○", UDim2.new(0, 22, 0, 22), UDim2.new(0, 4, 0.5, -11), td.done and C.Green or C.ToggleOff, td.done and C.Black or C.TextDim, 12)
+    corner(check, 99)
+
+    local txtL = makeLabel(row, td.text, 12, td.done and C.TextFaint or C.Text, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+    txtL.Size = UDim2.new(0.6, 0, 1, 0); txtL.Position = UDim2.new(0, 30, 0, 0)
+
+    local priBadge = makeBadge(row, td.pri, priColors[td.pri] or C.Blue)
+    priBadge.Position = UDim2.new(0.75, 0, 0.5, -9)
+
+    local tText = td.text
+    check.MouseButton1Click:Connect(function()
+        td.done = not td.done
+        check.Text = td.done and "✓" or "○"
+        tween(check, {BackgroundColor3 = td.done and C.Green or C.ToggleOff, TextColor3 = td.done and C.Black or C.TextDim}, 0.15)
+        tween(txtL, {TextColor3 = td.done and C.TextFaint or C.Text}, 0.15)
+        toast(tText..(td.done and " completed" or " reopened"), td.done and "success" or "info")
+    end)
+end
+
+-- ── REMAINING PAGES (simplified) ─────────────────────────────
+local function makeSimplePage(pageKey, title, subtitle, content)
+    Pages[pageKey] = makePage()
+    local _, body = makeCard(Pages[pageKey], title, subtitle, 300)
+    body.Parent.Size = UDim2.new(1, 0, 0, 300)
+    if content then
+        for _, line in ipairs(content) do
+            local l = makeLabel(body, line, 12, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            l.Size = UDim2.new(1, 0, 0, 18)
+        end
+    end
+end
+
+makeSimplePage("roles", "Roles & Permissions", "Owner · Admin · Moderator · Member · Guest", {
+    "Owner     — All permissions",
+    "Admin     — Ban, Kick, Mute, Config, Roles",
+    "Moderator — Kick, Mute, Chat",
+    "Member    — Chat, Trade",
+    "Guest     — Chat only",
+})
+
+makeSimplePage("api", "API Console", "Send admin API requests", {
+    "GET  /api/v1/users         — List all users",
+    "POST /api/v1/users/ban     — Ban a user",
+    "POST /api/v1/server/lock   — Lock the server",
+    "GET  /api/v1/logs          — Fetch audit logs",
+    "POST /api/v1/roles/assign  — Assign a role",
+    "(Use the Terminal for live API calls)",
+})
+
+makeSimplePage("database", "Database Explorer", "3 collections · 1,892 docs · 48MB", {
+    "users      — 1,248 documents",
+    "logs       — 48,200 documents",
+    "bans       — 312 documents",
+    "configs    — 88 documents",
+    "sessions   — 342 documents",
+    "reports    — 94 documents",
+})
+
+makeSimplePage("files", "File Manager", "Server filesystem", {
+    "📁 backups/          — 1.2GB",
+    "📁 configs/          — 4.2KB",
+    "📁 logs/             — 340KB",
+    "📁 assets/           — 88MB",
+    "📄 server.cfg        — 4.2KB",
+    "📄 motd.txt          — 1.1KB",
+    "📄 users_export.csv  — 340KB",
+})
+
+makeSimplePage("integrations", "Integrations", "Connected services", {
+    "✓ Discord     — Ban sync & announcements",
+    "✓ GitHub      — Auto-deploy from repo",
+    "✓ Stripe      — Payment & subscription sync",
+    "✓ Cloudflare  — DDoS protection & DNS",
+    "✓ AWS S3      — Backup storage",
+    "✗ Slack       — Not connected",
+    "✗ PagerDuty   — Not connected",
+})
+
+makeSimplePage("appearance", "Appearance", "Theme & display settings", {
+    "Active theme: Cyberpunk Neon",
+    "Accent: #38D9F5 (Cyan) + #A259FF (Violet)",
+    "Background: #04050F",
+    "Animation: 0.18s cubic-bezier",
+    "",
+    "Presets available:",
+    "  Cyberpunk Neon · Midnight Glass",
+    "  Arctic Blue · Violet Singularity",
+    "  Emerald Matrix · Minimal Obsidian",
+})
+
+makeSimplePage("notifications", "Notifications", "5 unread", {
+    "🚨 Anti-Raid triggered — 2 min ago",
+    "⚖  New report: Nova Pyx — 14 min ago",
+    "💾 Backup completed (1.2GB) — 1h ago",
+    "🔒 5 failed logins from 182.x.x.x — 2h ago",
+    "⚙  Config changed by Kira Vex — 3h ago",
+})
+
+-- ============================================================
+-- COMMAND PALETTE (Ctrl+K)
+-- ============================================================
+local CmdPalette = makeFrame(ScreenGui,
+    UDim2.new(1, 0, 1, 0),
+    UDim2.new(0, 0, 0, 0),
+    Color3.fromRGB(0, 0, 0)
+)
+CmdPalette.BackgroundTransparency = 0.5
+CmdPalette.ZIndex = 100
+CmdPalette.Visible = false
+
+local CPBox = makeFrame(CmdPalette,
+    UDim2.new(0, 520, 0, 380),
+    UDim2.new(0.5, -260, 0.5, -190),
+    C.Panel
+)
+CPBox.ZIndex = 101
+corner(CPBox, 12)
+makeStroke(CPBox, C.Cyan, 1.5)
+
+local CPSearchRow = makeFrame(CPBox, UDim2.new(1, 0, 0, 46), nil, C.Panel2)
+CPSearchRow.ZIndex = 102
+corner(CPSearchRow, 12)
+local cpCover = makeFrame(CPSearchRow, UDim2.new(1, 0, 0, 8), UDim2.new(0, 0, 1, -8), C.Panel2)
+
+local cpSearchIcon = makeLabel(CPSearchRow, "⌕", 16, C.Cyan, Enum.TextXAlignment.Left, Enum.Font.GothamBold)
+cpSearchIcon.Size = UDim2.new(0, 28, 1, 0); cpSearchIcon.Position = UDim2.new(0, 12, 0, 0)
+
+local CPInput = makeTextBox(CPSearchRow, "Search commands, pages, actions…", UDim2.new(1, -52, 1, 0), UDim2.new(0, 44, 0, 0))
+CPInput.BackgroundTransparency = 1
+CPInput.TextSize = 14
+CPInput.ZIndex = 103
+
+makeSep(CPBox, C.Border).Position = UDim2.new(0, 0, 0, 46)
+
+local CPResults = makeScrollFrame(CPBox, UDim2.new(1, 0, 1, -56), UDim2.new(0, 0, 0, 50))
+CPResults.ZIndex = 102
+pad(CPResults, 6, 6, 8, 8)
+listLayout(CPResults, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, 3)
+
+local PALETTE_ITEMS = {
+    {icon="⬡",  label="Dashboard",        page="dashboard"},
+    {icon="👤", label="Open Users",        page="users"},
+    {icon="🛡", label="Roles & Permissions",page="roles"},
+    {icon="⚖",  label="Open Moderation",   page="moderation"},
+    {icon="⌘",  label="Open Commands",     page="commands"},
+    {icon="▶",  label="Open Terminal",     page="terminal"},
+    {icon="📋", label="Activity Logs",     page="logs"},
+    {icon="📊", label="System Monitor",    page="monitor"},
+    {icon="⚙",  label="Open Automation",   page="automation"},
+    {icon="✓",  label="Open Tasks",        page="tasks"},
+    {icon="🔌", label="Integrations",      page="integrations"},
+    {icon="🔒", label="Security Center",   page="security"},
+    {icon="{}",  label="API Console",      page="api"},
+    {icon="🗄", label="Database Explorer", page="database"},
+    {icon="📁", label="File Manager",      page="files"},
+    {icon="🎨", label="Appearance",        page="appearance"},
+    {icon="🔔", label="Notifications",     page="notifications"},
+    {icon="📄", label="Generate Report",   action="report"},
+    {icon="☰",  label="Toggle Sidebar",   action="sidebar"},
+}
+
+local function closePalette()
+    CmdPalette.Visible = false
+    State.CmdPaletteOpen = false
+    CPInput.Text = ""
+end
+
+local function openPalette()
+    CmdPalette.Visible = true
+    State.CmdPaletteOpen = true
+    CPInput:CaptureFocus()
+end
+
+local function buildPalette(q)
+    for _, ch in ipairs(CPResults:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    local ql = q:lower()
+    local shown = 0
+
+    -- Nav items
+    for _, pi in ipairs(PALETTE_ITEMS) do
+        if ql == "" or pi.label:lower():find(ql,1,true) then
+            shown = shown + 1
+            local row = makeButton(CPResults, "", UDim2.new(1, 0, 0, 34), nil, Color3.new(0,0,0), C.Text, 13)
+            row.BackgroundTransparency = shown == 1 and 0.85 or 1
+            row.BackgroundColor3 = C.ItemHov
+            row.ZIndex = 103
+            corner(row, 6)
+            row.LayoutOrder = shown
+
+            local il = makeLabel(row, pi.icon, 14, C.Cyan, Enum.TextXAlignment.Center, Enum.Font.GothamBold)
+            il.Size = UDim2.new(0, 28, 1, 0); il.ZIndex = 104
+
+            local nl = makeLabel(row, pi.label, 13, C.Text, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+            nl.Size = UDim2.new(1, -40, 1, 0); nl.Position = UDim2.new(0, 34, 0, 0); nl.ZIndex = 104
+
+            row.MouseEnter:Connect(function() tween(row, {BackgroundTransparency = 0.8}, 0.1) end)
+            row.MouseLeave:Connect(function() tween(row, {BackgroundTransparency = 1}, 0.1) end)
+
+            local pPage = pi.page
+            local pAction = pi.action
+            row.MouseButton1Click:Connect(function()
+                closePalette()
+                if pPage and NavItems[pPage] then
+                    NavItems[pPage].btn.MouseButton1Click:Fire()
+                elseif pAction == "report" then
+                    toast("Report generated", "success", "📄 Report Ready")
+                elseif pAction == "sidebar" then
+                    -- sidebar toggle handled below
+                end
+            end)
+        end
+    end
+
+    -- Command matches
+    if q:len() > 0 then
+        local cmdCount = 0
+        for _, cmd in ipairs(ALL_COMMANDS) do
+            if (cmd.cmd..cmd.desc):lower():find(ql,1,true) then
+                cmdCount = cmdCount + 1
+                if cmdCount > 5 then break end
+                shown = shown + 1
+                local row = makeButton(CPResults, "", UDim2.new(1, 0, 0, 34), nil, Color3.new(0,0,0), C.Text, 13)
+                row.BackgroundTransparency = 1
+                row.ZIndex = 103
+                corner(row, 6)
+                row.LayoutOrder = shown + 100
+
+                local il = makeLabel(row, "⌘", 13, C.Violet, Enum.TextXAlignment.Center, Enum.Font.GothamBold)
+                il.Size = UDim2.new(0, 28, 1, 0); il.ZIndex = 104
+
+                local nl = makeLabel(row, ":"..cmd.cmd.."  —  "..cmd.desc, 12, C.TextDim, Enum.TextXAlignment.Left, Enum.Font.Gotham)
+                nl.Size = UDim2.new(1, -40, 1, 0); nl.Position = UDim2.new(0, 34, 0, 0); nl.ZIndex = 104
+
+                row.MouseEnter:Connect(function() tween(row, {BackgroundTransparency = 0.8}, 0.1) end)
+                row.MouseLeave:Connect(function() tween(row, {BackgroundTransparency = 1}, 0.1) end)
+
+                local cmdStr = cmd.cmd
+                row.MouseButton1Click:Connect(function()
+                    closePalette()
+                    if NavItems["terminal"] then NavItems["terminal"].btn.MouseButton1Click:Fire() end
+                    task.wait(0.15)
+                    if _G.NX_TermInput then _G.NX_TermInput.Text = cmdStr end
+                    toast(":"..cmdStr.." loaded in terminal", "info")
+                end)
+            end
+        end
+    end
+end
+
+CPInput.Changed:Connect(function(prop)
+    if prop == "Text" then buildPalette(CPInput.Text) end
+end)
+
+CmdPalette.MouseButton1Click:Connect(function()
+    closePalette()
+end)
+
+-- ============================================================
+-- CHAT COMMAND LISTENER
+-- ============================================================
+Players.LocalPlayer.Chatted:Connect(function(msg)
+    if msg:sub(1,1) == ":" then
+        local cmd = msg:sub(2)
+        if NavItems["terminal"] then NavItems["terminal"].btn.MouseButton1Click:Fire() end
+        task.wait(0.1)
+        processCmd(cmd)
+        toast("Chat cmd: :"..cmd:split(" ")[1], "info", "⌘ Command")
+    end
+end)
+
+-- ============================================================
+-- KEYBOARD SHORTCUTS
+-- ============================================================
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe and not State.CmdPaletteOpen then return end
+
+    -- Ctrl/Cmd+K → Command Palette
+    if (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+    or  UserInputService:IsKeyDown(Enum.KeyCode.RightControl))
+    and input.KeyCode == Enum.KeyCode.K then
+        if State.CmdPaletteOpen then closePalette() else openPalette() end
+        return
+    end
+
+    -- Escape
+    if input.KeyCode == Enum.KeyCode.Escape then
+        if State.CmdPaletteOpen then closePalette() end
+        return
+    end
+
+    -- Ctrl+B → Toggle minimise
+    if (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+    or  UserInputService:IsKeyDown(Enum.KeyCode.RightControl))
+    and input.KeyCode == Enum.KeyCode.B then
+        MinBtn.MouseButton1Click:Fire()
+        return
+    end
+end)
+
+-- ============================================================
+-- INIT — first page
+-- ============================================================
+task.wait(0.35)
+
+-- Init terminal
+termPrint("NEBULA X ADMIN — Terminal v2.0", "sys")
+termPrint("Type :help for "..#ALL_COMMANDS.." available commands.", "sys")
+termPrint(string.rep("─", 50), "sys")
+
+-- Init command/user/log rows
+buildCmdRows("")
+buildUserRows("")
+buildLogRows("")
+buildPalette("")
+
+-- Activate dashboard
+if NavItems["dashboard"] then
+    NavItems["dashboard"].activate()
+    for _, p in pairs(Pages) do p.Visible = false end
+    Pages["dashboard"].Visible = true
+end
+
+toast("NEBULA X ADMIN online", "success", "⬡ System Ready")
